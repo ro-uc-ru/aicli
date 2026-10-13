@@ -1,0 +1,55 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors and IDEs
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+
+# Claude Code
+.claude/
+.agents/
+
+# Build outputs
+bin/
+dist/
+/aicli
+/aicli.exe
+
+# Test results and profiling
+*.test
+*.out
+coverage*
+*.coverprofile
+*.prof
+test-results/
+reports/
+
+# Go
+go.work
+go.work.sum
+vendor/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python artifacts (generated projects run inside the repo)
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Logs and temp
+*.log
+tmp/
+.air.toml
+
+# Manual testing of generated projects
+playground/

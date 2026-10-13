@@ -13,9 +13,10 @@
 ## 1. Stack (STK)
 - STK-1 The CLI is written only in Go, with the version pinned in go.mod.
 - STK-2 The command tree is built with Cobra; interactive UI uses only Charm libraries (Bubble Tea, Huh, Lipgloss; others only if a spec requires them).
-- STK-3 Generated projects target Python, FastAPI, SQLAlchemy, Alembic, Pydantic with pydantic-settings, uv and pytest by default.
+- STK-3 Generated projects target Python, FastAPI, SQLAlchemy, Alembic, Pydantic with pydantic-settings, uv and pytest by default, plus uvicorn (server), httpx (test client) and ruff (lint) as minimal base tooling. Any further dependency (database drivers, LLM providers, etc.) is decided by the spec that needs it, under STK-4.
 - STK-4 No new dependency (Go module or generated-project package) without team approval.
 - STK-5 Optional capabilities (LLM provider, vector store, queues, observability) are opt-in features or flags, never part of the default scaffold.
+- STK-6 `golang.org/x/sys` and `golang.org/x/term` are pre-approved Go dependencies, to be added only when a spec needs them (atomic no-replace rename; TTY detection). Platform-specific code that uses them lives in files with build tags for the platforms in LIM-1, as the only exception to ARC-8.
 
 ## 2. Architecture and Boundaries (ARC)
 - ARC-1 Every feature has a spec in `specs/` before any code is written for it.
@@ -33,7 +34,7 @@
 - TST-3 Integration tests scaffold a project into a temp dir and run its own pytest and lint.
 - TST-4 `go test ./...` and `golangci-lint run` pass before merge.
 - TST-5 Every generated project includes passing pytest tests out of the box.
-- TST-6 No test calls a real LLM provider or the network.
+- TST-6 No test calls a real LLM provider. No test uses the network, except integration tests (build tag `integration`), and only to install the generated project's dependencies (e.g. `uv sync`).
 
 ## 4. Security (SEC)
 - SEC-1 No secrets in the repo; generated projects read configuration from environment variables through pydantic-settings.

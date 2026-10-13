@@ -13,7 +13,7 @@ Thumbs.db
 # Claude Code
 .claude/
 .agents/
-
+.mcp.json
 # Build outputs
 bin/
 dist/
@@ -23,7 +23,8 @@ dist/
 # Test results and profiling
 *.test
 *.out
-coverage*
+coverage.out
+coverage.html
 *.coverprofile
 *.prof
 test-results/
@@ -53,3 +54,6 @@ tmp/
 
 # Manual testing of generated projects
 playground/
+
+# MCP config
+.mcp.json

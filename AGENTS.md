@@ -13,6 +13,8 @@ A Rails-style CLI that scaffolds and evolves convention-over-configuration FastA
 - Every feature ships with tests, and a feature is not done until they pass.
 - Keep the command tree flat: one folder per command or subcommand directly under cmd/, no nested folders, no unrelated commands sharing a package. Logic lives in internal/, not in cmd/.
 - Do not add dependencies without asking.
+- `specs/` is read-only for implementation tasks. The only allowed edits are ticking the task itself in `tasks.md` and, in the final Definition-of-Done task, ticking the DoD items in `spec.md` that the task has verified.
+- Every test's doc comment names the FR/EC ids it covers on a line `Covers: FR-013, EC-002`, so that coverage of the spec is checkable with a grep. An FR or EC with no matching `Covers:` line is a gap.
 
 ## Stack
 - Language:   Go (version pinned in go.mod)
@@ -32,6 +34,7 @@ The projects aicli generates use: Python, FastAPI, SQLAlchemy (base ORM), Alembi
 - internal/gen   <- scaffolding and code generators. Depends on: text/template, embed
 - templates/     <- embedded templates for generated Python/FastAPI projects. Depends on: embed
 - specs/         <- one spec per feature (SDD source of truth)
+- specs/<id>/designs/ <- optional, only when a spec needs visual or output mockups (text/Markdown). Non-normative: the spec's FR/EC and golden files prevail.
 - docs/          <- project documentation: constitution.md (approved principles and hard limits)
 
 ## Commands

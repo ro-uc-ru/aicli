@@ -1,0 +1,7 @@
+Created project myapp
+
+Next steps:
+  cd myapp
+  cp .env.example .env   (optional)
+  uv sync
+  uv run uvicorn app.main:app --reload

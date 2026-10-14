@@ -14,7 +14,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ro-uc-ru/aicli/internal/home"
 	"github.com/ro-uc-ru/aicli/internal/project"
+	"github.com/ro-uc-ru/aicli/internal/tui"
 )
 
 // update regenerates the golden files instead of comparing against them.
@@ -385,11 +387,11 @@ func TestUnknownCommandNoCheck(t *testing.T) {
 	}
 }
 
-// TestBareRootNoCheck runs `aicli` with no arguments outside a project: it
-// prints help, exits 0 and does not run the check (the root is not runnable,
-// and the spec that makes it runnable must declare it exempt).
+// TestBareRootNoCheck runs `aicli` with no arguments and buffers outside a
+// project: it prints the static home screen, exits 0 and does not run the
+// check (the home screen is exempt).
 //
-// Covers: FR-007
+// Covers: FR-001, EC-008
 func TestBareRootNoCheck(t *testing.T) {
 	calls := 0
 	getwd := func() (string, error) {
@@ -397,12 +399,13 @@ func TestBareRootNoCheck(t *testing.T) {
 		return t.TempDir(), nil
 	}
 	var out, errb bytes.Buffer
-	code := run(context.Background(), newTestRoot(t, getwd, &probe{}), nil, &out, &errb)
+	root := newTestRoot(t, getwd, &probe{})
+	code := run(context.Background(), root, []string{}, &out, &errb)
 	if code != 0 || errb.Len() != 0 {
 		t.Fatalf("code=%d stderr=%q, want 0 and empty", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "Usage:") {
-		t.Errorf("stdout = %q, want help", out.String())
+	if want := tui.RenderHomeStatic(home.Entries(root)); out.String() != want {
+		t.Errorf("stdout = %q, want the static home screen %q", out.String(), want)
 	}
 	if calls != 0 {
 		t.Errorf("the check ran %d time(s)", calls)

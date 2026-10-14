@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	newcmd "github.com/ro-uc-ru/aicli/cmd/new"
+	"github.com/ro-uc-ru/aicli/internal/home"
 	"github.com/ro-uc-ru/aicli/internal/project"
 	"github.com/ro-uc-ru/aicli/internal/scaffold"
 	"github.com/ro-uc-ru/aicli/internal/tui"
@@ -44,7 +45,8 @@ func NewRoot(baseDir string) *cobra.Command {
 // Out: the root command, whose PersistentPreRunE runs the project root check
 // before every non-exempt command (FR-002, FR-007), with Cobra's traverse
 // run hooks enabled so that a command's own PersistentPreRunE does not
-// replace it.
+// replace it. The root is runnable: with no arguments it shows the home
+// screen through home.Show (FR-001).
 // Side effects: none; Cobra's traverse run hooks are enabled once by init.
 func newRoot(baseDir string, getwd func() (string, error)) *cobra.Command {
 	cmd := &cobra.Command{
@@ -54,6 +56,9 @@ func newRoot(baseDir string, getwd func() (string, error)) *cobra.Command {
 		SilenceErrors: true,
 		PersistentPreRunE: func(c *cobra.Command, _ []string) error {
 			return checkProject(c, getwd)
+		},
+		RunE: func(c *cobra.Command, _ []string) error {
+			return home.Show(c.Context(), c, c.InOrStdin(), c.OutOrStdout(), os.Getenv)
 		},
 	}
 	cmd.AddCommand(newcmd.NewCommand(baseDir))

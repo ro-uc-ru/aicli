@@ -1,0 +1,7 @@
+Create a new FastAPI project
+
+Usage:
+  aicli new <name> [flags]
+
+Flags:
+  -h, --help   help for new

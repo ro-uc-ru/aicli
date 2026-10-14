@@ -1,0 +1,15 @@
+ █████╗ ██╗ ██████╗██╗     ██╗
+██╔══██╗██║██╔════╝██║     ██║
+███████║██║██║     ██║     ██║
+██╔══██║██║██║     ██║     ██║
+██║  ██║██║╚██████╗███████╗██║
+╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝
+Scaffolding for FastAPI backends for AI/LLM apps.
+Convention over configuration, driven by specs.
+
+new         Create a new aicli project
+db          Database migrations
+db migrate  Apply migrations
+nodesc
+日本語      CJK path
+🚀go        Emoji path

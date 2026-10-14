@@ -4,8 +4,9 @@ import "slices"
 
 // exemptCommands is the single list of top-level commands that do not
 // perform the project root check (FR-007). A spec that adds a command which
-// needs an exemption declares it here.
-var exemptCommands = []string{"new", "help", "version", "completion", "__complete"}
+// needs an exemption declares it here. The entry "aicli" stands for the root
+// command run with no arguments, i.e. the home screen (FR-001).
+var exemptCommands = []string{"new", "help", "version", "completion", "__complete", "aicli"}
 
 // IsExempt reports whether a command is exempt from the project root check.
 //

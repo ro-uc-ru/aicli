@@ -9,8 +9,23 @@ import (
 	"testing"
 )
 
-// update regenerates the golden files instead of comparing against them.
-var update = flag.Bool("update", false, "regenerate golden files")
+// updating reports whether the golden files are to be regenerated instead of
+// compared. The `-update` flag is registered by the teatest golden package,
+// which the external flow tests import, so it is looked up, not redefined.
+//
+// In: none. Out: true when `-update` was given. Side effects: none.
+func updating() bool {
+	f := flag.Lookup("update")
+	if f == nil {
+		return false
+	}
+	g, ok := f.Value.(flag.Getter)
+	if !ok {
+		return false
+	}
+	b, _ := g.Get().(bool)
+	return b
+}
 
 // ansiRE matches ANSI CSI escape sequences.
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
@@ -22,7 +37,7 @@ var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 // Covers: FR-015.
 func TestRenderSuccessPlain(t *testing.T) {
 	got := RenderSuccess("myapp", false)
-	if *update {
+	if updating() {
 		if err := os.WriteFile("testdata/success.golden", []byte(got), 0o644); err != nil {
 			t.Fatal(err)
 		}

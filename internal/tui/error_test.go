@@ -16,7 +16,7 @@ const errorMsg = "missing project name\nUsage: aicli new <name>"
 // Covers: FR-023.
 func TestRenderErrorPlain(t *testing.T) {
 	got := RenderError(errorMsg, false)
-	if *update {
+	if updating() {
 		if err := os.WriteFile("testdata/error.golden", []byte(got), 0o644); err != nil {
 			t.Fatal(err)
 		}

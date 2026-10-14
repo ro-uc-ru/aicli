@@ -1,1 +1,1 @@
-current active spec: 001-aicli-new
+current active spec: 002-project-root-detection

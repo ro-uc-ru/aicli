@@ -1,0 +1,3 @@
+Error: not inside an aicli project
+  Missing: pyproject.toml, alembic.ini, app/main.py, migrations/env.py
+  Run this command from the root of a project created with `aicli new`.

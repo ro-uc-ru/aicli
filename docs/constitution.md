@@ -49,6 +49,7 @@
 - ERR-2 On failure the CLI exits non-zero and writes the error to stderr.
 - ERR-3 Every command works non-interactively (flags only) when there is no TTY.
 - ERR-4 Logs and output never contain API keys or secrets.
+- ERR-5 When a command fails it writes the error to stderr, leaves stdout empty and exits with code 1. The plain message starts with `Error: ` and may be followed by continuation lines indented by two spaces. When stderr is a TTY, `NO_COLOR` is unset or empty and `TERM` is not `dumb`, the error is styled with Lipgloss, and the spec that introduces the error defines its styled form; otherwise it is written plain, with no ANSI sequences. The only exception is interruption by a signal, which exits with 128 plus the signal number and prints nothing.
 
 ## 6. Scope (SCP)
 - SCP-1 In scope: scaffolding and generating convention-based FastAPI backends for AI/LLM apps.

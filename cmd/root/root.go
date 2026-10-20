@@ -11,7 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	addcmd "github.com/ro-uc-ru/aicli/cmd/add"
 	newcmd "github.com/ro-uc-ru/aicli/cmd/new"
+	"github.com/ro-uc-ru/aicli/internal/add"
 	"github.com/ro-uc-ru/aicli/internal/home"
 	"github.com/ro-uc-ru/aicli/internal/project"
 	"github.com/ro-uc-ru/aicli/internal/scaffold"
@@ -62,6 +64,7 @@ func newRoot(baseDir string, getwd func() (string, error)) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(newcmd.NewCommand(baseDir))
+	cmd.AddCommand(addcmd.NewCommand())
 	return cmd
 }
 
@@ -111,8 +114,10 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 // In: ctx, args, stdout and stderr, as in Execute; cmd, the root command to
 // run (tests pass one built by newRoot with extra commands registered).
 // Out: the exit code, as in Execute.
-// Side effects: as in Execute.
+// Side effects: as in Execute; first calls add.Prepare on cmd so that
+// deprecated features print no notice.
 func run(ctx context.Context, cmd *cobra.Command, args []string, stdout, stderr io.Writer) int {
+	add.Prepare(cmd)
 	cmd.SetArgs(args)
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)

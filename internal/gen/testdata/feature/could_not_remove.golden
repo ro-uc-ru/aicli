@@ -1,0 +1,4 @@
+write file c.txt: boom
+could not remove:
+  sub/a.txt
+  b.txt

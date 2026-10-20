@@ -1,0 +1,8 @@
+create  features/name.txt
+create  features/name.md
+
+Added feature-1
+
+Next steps:
+  Set FEATURE_KEY in .env
+  Run uv sync

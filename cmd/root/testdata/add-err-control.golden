@@ -1,0 +1,2 @@
+Error: input-2 contains control characters
+  Usage: aicli add feature-1 <input-1> <input-2> [flags]

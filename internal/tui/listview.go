@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,10 +24,67 @@ type openMsg struct {
 	Index int
 }
 
-// listModel is the Bubble Tea model of the home screen's list view.
+// listConfig is what distinguishes one use of the list component from
+// another (FR-009).
+type listConfig struct {
+	// view is the layout view kind of the list.
+	view view
+	// top renders the block above the list when the layout shows it.
+	// In: styles, the styles in use; width, the terminal width; l, the
+	// layout. Out: the lines of the block, including its blank separator.
+	top func(styles homeStyles, width int, l layout) []string
+	// footer and footerEmpty are the key-hint footers with and without
+	// entries.
+	footer, footerEmpty string
+	// quitKeys are the key names that quit the program.
+	quitKeys []string
+	// action builds the command run when the entry at index i is chosen by
+	// `Enter` or by a click. It is never nil.
+	action func(i int) tea.Cmd
+}
+
+// homeTop renders the banner of the home screen as the top block of the
+// list.
+//
+// In: styles, the styles in use; width, the terminal width; l, the layout.
+// Out: the banner lines and a blank separator, or nil if the layout hides
+// the banner. Side effects: none.
+func homeTop(styles homeStyles, width int, l layout) []string {
+	if !l.Banner {
+		return nil
+	}
+	var lines []string
+	b := bannerFor(width)
+	for i, s := range b {
+		if i < len(b)-len(bannerDescription) {
+			lines = append(lines, styles.Banner.Render(s))
+		} else {
+			lines = append(lines, styles.BannerDesc.Render(s))
+		}
+	}
+	return append(lines, "")
+}
+
+// homeListConfig is the configuration of the home screen's list: the
+// banner, the home footers, `q` and `Ctrl+C` to quit, and openMsg as the
+// action.
+var homeListConfig = listConfig{
+	view:        viewList,
+	top:         homeTop,
+	footer:      footerList,
+	footerEmpty: footerListEmpty,
+	quitKeys:    []string{"q", "ctrl+c"},
+	action: func(i int) tea.Cmd {
+		return func() tea.Msg { return openMsg{Index: i} }
+	},
+}
+
+// listModel is the Bubble Tea model of a list view: the home screen's list
+// or, with another listConfig, the add selector's.
 type listModel struct {
 	entries []Entry
 	styles  homeStyles
+	cfg     listConfig
 	width   int
 	height  int
 	pointer int
@@ -41,7 +99,17 @@ type listModel struct {
 // (FR-005).
 // Side effects: none.
 func newListModel(entries []Entry, styled bool, width, height int) listModel {
-	return listModel{entries: entries, styles: newHomeStyles(styled), width: width, height: height}
+	return newConfiguredListModel(homeListConfig, entries, styled, width, height)
+}
+
+// newConfiguredListModel builds a list model with its own configuration.
+//
+// In: cfg, the configuration, with action set; the other arguments as for
+// newListModel.
+// Out: the model, with the pointer on the first entry and the offset at 0.
+// Side effects: none.
+func newConfiguredListModel(cfg listConfig, entries []Entry, styled bool, width, height int) listModel {
+	return listModel{entries: entries, styles: newHomeStyles(styled), cfg: cfg, width: width, height: height}
 }
 
 // layout returns the current screen layout of the list view.
@@ -49,7 +117,7 @@ func newListModel(entries []Entry, styled bool, width, height int) listModel {
 // In: none. Out: the layout for the model's size and entry count.
 // Side effects: none.
 func (m listModel) layout() layout {
-	return computeLayout(m.width, m.height, viewList, len(m.entries))
+	return computeLayout(m.width, m.height, m.cfg.view, len(m.entries))
 }
 
 // clampOffset keeps the offset inside [0, entries-area].
@@ -74,12 +142,11 @@ func (m listModel) showPointer() listModel {
 	return m.clampOffset()
 }
 
-// open builds the command that opens the entry under the pointer.
+// open builds the command that acts on the entry under the pointer.
 //
-// In: none. Out: a command producing openMsg. Side effects: none.
+// In: none. Out: the configured action's command. Side effects: none.
 func (m listModel) open() tea.Cmd {
-	i := m.pointer
-	return func() tea.Msg { return openMsg{Index: i} }
+	return m.cfg.action(m.pointer)
 }
 
 // Update handles one message (FR-006, FR-007, FR-010, FR-011, EC-001,
@@ -113,7 +180,7 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 // Side effects: none.
 func (m listModel) updateKey(msg tea.KeyMsg) (listModel, tea.Cmd) {
 	key := msg.String()
-	if key == "q" || key == "ctrl+c" {
+	if slices.Contains(m.cfg.quitKeys, key) {
 		return m, tea.Quit
 	}
 	if len(m.entries) == 0 {
@@ -180,17 +247,7 @@ func (m listModel) Init() tea.Cmd { return nil }
 func (m listModel) View() string {
 	l := m.layout()
 	var lines []string
-	if l.Banner {
-		b := bannerFor(m.width)
-		for i, s := range b {
-			if i < len(b)-len(bannerDescription) {
-				lines = append(lines, m.styles.Banner.Render(s))
-			} else {
-				lines = append(lines, m.styles.BannerDesc.Render(s))
-			}
-		}
-		lines = append(lines, "")
-	}
+	lines = append(lines, m.cfg.top(m.styles, m.width, l)...)
 	if l.Indicators {
 		lines = append(lines, m.indicator(m.offset > 0, moreAbove))
 	}
@@ -208,9 +265,9 @@ func (m listModel) View() string {
 		lines = append(lines, m.indicator(m.offset+l.AreaHeight < len(m.entries), moreBelow))
 	}
 	if l.Footer {
-		footer := footerList
+		footer := m.cfg.footer
 		if len(m.entries) == 0 {
-			footer = footerListEmpty
+			footer = m.cfg.footerEmpty
 		}
 		lines = append(lines, m.styles.Footer.Render(truncate(footer, m.width)))
 	}

@@ -1,0 +1,8 @@
+create  a/b.py
+create  c.txt
+
+Added feature-1
+
+Next steps:
+  Set OPENAI_API_KEY in .env
+  uv sync

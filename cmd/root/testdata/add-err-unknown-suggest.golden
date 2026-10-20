@@ -1,0 +1,3 @@
+Error: unknown feature "feature-2"
+  Did you mean "feature-1"?
+  Run `aicli add` to see the available features.

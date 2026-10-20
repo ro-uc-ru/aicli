@@ -10,7 +10,8 @@ import (
 
 // TestRootHelpBaseline compares the plain `aicli --help` output with the
 // baseline captured before the root became runnable: once the `aicli [flags]`
-// Usage line, the only change allowed, is removed, they must be identical.
+// Usage line and the `add` command line, the only changes allowed, are
+// removed, they must be identical.
 // In: t, the test; run with -update to regenerate the golden file.
 // Out: none. Side effects: with -update, writes testdata/root-help-before.golden.
 // Covers: EC-008.
@@ -33,6 +34,7 @@ func TestRootHelpBaseline(t *testing.T) {
 		t.Fatalf("read golden (run with -update to create): %v", err)
 	}
 	got := bytes.Replace(out.Bytes(), []byte("  aicli [flags]\n"), nil, 1)
+	got = bytes.Replace(got, []byte("  add         Add an AI/LLM feature to this project.\n"), nil, 1)
 	if !bytes.Equal(got, want) {
 		t.Errorf("root help = %q, want %q", out.String(), want)
 	}

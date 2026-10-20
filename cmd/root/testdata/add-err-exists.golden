@@ -1,0 +1,3 @@
+Error: cannot add feature-1, these files already exist:
+  features/x.txt
+  features/x.md

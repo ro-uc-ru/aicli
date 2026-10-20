@@ -8,6 +8,9 @@ const (
 	viewList view = iota
 	// viewDetail is the help of one command, topped by a header.
 	viewDetail
+	// viewSelector is the add selector's list, topped by the header, the
+	// description line and a blank line.
+	viewSelector
 )
 
 const (
@@ -20,6 +23,11 @@ const (
 	// headerRows is the height of the detail header: the header line and a
 	// blank separator line (FR-019).
 	headerRows = 2
+	// selectorHeaderRows is the height of the selector header line.
+	selectorHeaderRows = 1
+	// descriptionRows is the height of the selector description line and the
+	// blank line after it.
+	descriptionRows = 2
 	// indicatorRows is the height of the two scroll-indicator lines, one
 	// above and one below the area (FR-020).
 	indicatorRows = 2
@@ -37,6 +45,9 @@ type layout struct {
 	BannerRows int
 	// Header reports whether the detail header is shown (detail view only).
 	Header bool
+	// Description reports whether the selector's description line and the
+	// blank line after it are shown (selector view only).
+	Description bool
 	// Indicators reports whether both scroll-indicator lines are shown.
 	Indicators bool
 	// Footer reports whether the footer is shown.
@@ -53,8 +64,9 @@ type layout struct {
 // narrow banner; height, the terminal height in rows; v, the view shown;
 // contentLen, the number of entries (list) or help lines (detail).
 // Out: the layout. Parts are hidden, in this order, until the area gets at
-// least one row: the banner, the indicator lines, the footer, then (detail
-// view) the header. The area is as tall as the room left, but no taller than
+// least one row: the banner (list view) or the description line (selector
+// view), the indicator lines, the footer, then (detail and selector views)
+// the header. The area is as tall as the room left, but no taller than
 // the content, and never less than one row, even when height is below 1.
 // Side effects: none.
 func computeLayout(width, height int, v view, contentLen int) layout {
@@ -67,6 +79,13 @@ func computeLayout(width, height int, v view, contentLen int) layout {
 		}
 	} else {
 		l.Header = true
+		if v == viewSelector {
+			l.Description = true
+		}
+	}
+	headerH := headerRows
+	if v == viewSelector {
+		headerH = selectorHeaderRows
 	}
 	used := func() int {
 		n := 0
@@ -74,7 +93,10 @@ func computeLayout(width, height int, v view, contentLen int) layout {
 			n += l.BannerRows
 		}
 		if l.Header {
-			n += headerRows
+			n += headerH
+		}
+		if l.Description {
+			n += descriptionRows
 		}
 		if l.Indicators {
 			n += indicatorRows
@@ -86,6 +108,9 @@ func computeLayout(width, height int, v view, contentLen int) layout {
 	}
 	if height-used() < 1 && l.Banner {
 		l.Banner, l.BannerRows = false, 0
+	}
+	if height-used() < 1 {
+		l.Description = false
 	}
 	if height-used() < 1 {
 		l.Indicators = false
@@ -101,7 +126,10 @@ func computeLayout(width, height int, v view, contentLen int) layout {
 		l.AreaTop += l.BannerRows
 	}
 	if l.Header {
-		l.AreaTop += headerRows
+		l.AreaTop += headerH
+	}
+	if l.Description {
+		l.AreaTop += descriptionRows
 	}
 	if l.Indicators {
 		l.AreaTop++

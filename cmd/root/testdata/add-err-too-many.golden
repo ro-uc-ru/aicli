@@ -1,0 +1,2 @@
+Error: feature-1 takes 2 argument(s), got 3
+  Usage: aicli add feature-1 <input-1> <input-2> [flags]

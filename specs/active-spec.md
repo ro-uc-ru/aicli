@@ -1,1 +1,1 @@
-current active spec: 003-home-screen
+current active spec: 004-add-command

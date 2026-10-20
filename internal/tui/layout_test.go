@@ -84,3 +84,42 @@ func TestEntryAtRow(t *testing.T) {
 		})
 	}
 }
+
+// TestComputeLayoutSelector checks the selector view from one row of height
+// up: the hiding order is the description line, the indicator lines, the
+// footer, then the header.
+//
+// Covers: FR-008, EC-010
+func TestComputeLayoutSelector(t *testing.T) {
+	type want struct {
+		header, desc, ind, footer bool
+		top, area                 int
+	}
+	cases := []struct {
+		name    string
+		height  int
+		content int
+		want    want
+	}{
+		{"full", 30, 3, want{true, true, true, true, 4, 3}},
+		{"scrolls", 8, 5, want{true, true, true, true, 4, 2}},
+		{"1 row area", 7, 5, want{true, true, true, true, 4, 1}},
+		{"description hidden", 6, 5, want{true, false, true, true, 2, 2}},
+		{"description hidden, 1 row", 5, 5, want{true, false, true, true, 2, 1}},
+		{"indicators hidden", 4, 5, want{true, false, false, true, 1, 2}},
+		{"indicators hidden, 1 row", 3, 5, want{true, false, false, true, 1, 1}},
+		{"footer hidden", 2, 5, want{true, false, false, false, 1, 1}},
+		{"header hidden", 1, 5, want{false, false, false, false, 0, 1}},
+		{"height 0", 0, 5, want{false, false, false, false, 0, 1}},
+		{"empty", 30, 0, want{true, true, true, true, 4, 1}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			l := computeLayout(80, c.height, viewSelector, c.content)
+			got := want{l.Header, l.Description, l.Indicators, l.Footer, l.AreaTop, l.AreaHeight}
+			if got != c.want || l.Banner {
+				t.Errorf("layout = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}

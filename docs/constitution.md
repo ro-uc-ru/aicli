@@ -41,7 +41,7 @@
 - SEC-2 Generated projects ship `.env.example`, never `.env`, and their `.gitignore` excludes `.env`.
 - SEC-3 Project names and paths given to the CLI are validated at the command boundary; generators never write outside the target directory.
 - SEC-4 The CLI sends no telemetry or data to any external service without explicit opt-in.
-- SEC-5 Generators never overwrite an existing file without explicit confirmation or flag.
+- SEC-5 Generators never overwrite or replace an existing file without explicit confirmation or flag. Inserting lines right after a marker line (`# aicli:<name>`) of an existing file is not overwriting, as long as no existing byte is changed or removed, the change is reported, and it is undone on failure.
 - SEC-6 The CLI never imports, evaluates or executes the user's Python code itself; the only external process it spawns is `uv`.
 
 ## 5. Errors and Logging (ERR)

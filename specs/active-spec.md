@@ -1,1 +1,1 @@
-current active spec: 004-add-command
+current active spec: 005-add-llm-provider

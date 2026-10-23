@@ -9,7 +9,7 @@ import (
 // styled, that the styled output stripped of ANSI equals the unstyled one,
 // and that each styled output has an ESC.
 //
-// Covers: FR-008, FR-011, FR-016, FR-018
+// Covers: FR-006, FR-007, FR-008, FR-011, FR-016, FR-018
 func TestAddStyles(t *testing.T) {
 	const sample = "> feature-1  Description"
 	plain, styled := newAddStyles(false), newAddStyles(true)
@@ -21,6 +21,13 @@ func TestAddStyles(t *testing.T) {
 		"focused":  {plain.FieldFocused.Render(sample), styled.FieldFocused.Render(sample)},
 		"choice":   {plain.Choice.Render(sample), styled.Choice.Render(sample)},
 		"error":    {plain.Error.Render(sample), styled.Error.Render(sample)},
+
+		"check cursor":     {plain.CheckCursor.Render(sample), styled.CheckCursor.Render(sample)},
+		"check selected":   {plain.CheckSelected.Render(sample), styled.CheckSelected.Render(sample)},
+		"check unselected": {plain.CheckUnselected.Render(sample), styled.CheckUnselected.Render(sample)},
+		"already added":    {plain.AlreadyAdded.Render(sample), styled.AlreadyAdded.Render(sample)},
+		"all added":        {plain.AllAdded.Render(sample), styled.AllAdded.Render(sample)},
+		"will update":      {plain.WillUpdate.Render(sample), styled.WillUpdate.Render(sample)},
 	}
 	for name, pair := range pairs {
 		if strings.Contains(pair[0], "\x1b") {
@@ -35,6 +42,18 @@ func TestAddStyles(t *testing.T) {
 	}
 	if styled.Selected.Render(sample) == styled.Normal.Render(sample) {
 		t.Error("selected style equals the normal style")
+	}
+	for name, want := range map[string]string{
+		"check cursor":     "1;38;5;117m",
+		"check selected":   "38;5;117m",
+		"check unselected": "38;5;255m",
+		"already added":    "38;5;245m",
+		"all added":        "38;5;245m",
+		"will update":      "38;5;245m",
+	} {
+		if !strings.Contains(pairs[name][1], want) {
+			t.Errorf("%s: styled output %q lacks %s", name, pairs[name][1], want)
+		}
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	addcmd "github.com/ro-uc-ru/aicli/cmd/add"
+	"github.com/ro-uc-ru/aicli/cmd/addllmprovider"
 	newcmd "github.com/ro-uc-ru/aicli/cmd/new"
 	"github.com/ro-uc-ru/aicli/internal/add"
 	"github.com/ro-uc-ru/aicli/internal/home"
@@ -64,7 +65,9 @@ func newRoot(baseDir string, getwd func() (string, error)) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(newcmd.NewCommand(baseDir))
-	cmd.AddCommand(addcmd.NewCommand())
+	add := addcmd.NewCommand()
+	add.AddCommand(addllmprovider.NewCommand())
+	cmd.AddCommand(add)
 	return cmd
 }
 

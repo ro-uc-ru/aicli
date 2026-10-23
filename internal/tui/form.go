@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 
@@ -15,6 +16,20 @@ const (
 	footerFormLast = "enter continue · shift+tab back · esc back · ctrl+c quit"
 	// hintChoose is the key hint a choice field adds to its footer.
 	hintChoose = "↑/↓ choose · "
+	// hintToggle is the key hint a multi-choice field adds to its footer
+	// (FR-006).
+	hintToggle = "↑/↓ move · space toggle · "
+	// footerFormMulti is the footer of a multi-choice field with something
+	// to select; its Esc word is filled in by footer (EC-016).
+	footerFormMulti = hintToggle + "enter continue · %sshift+tab back · esc %s · ctrl+c quit"
+	// footerFormSolo is footerFormMulti for a form with a single field,
+	// which has nowhere to go back to.
+	footerFormSolo = hintToggle + "enter continue · esc %s · ctrl+c quit"
+	// footerFormAllAdded is the footer when every choice is already added
+	// (EC-006).
+	footerFormAllAdded = "esc %s · ctrl+c quit"
+	// escQuit and escBack are the Esc words of the footer.
+	escQuit, escBack = "quit", "back"
 )
 
 // formDoneMsg asks the program to show the confirmation of the feature
@@ -32,18 +47,29 @@ type formBackMsg struct {
 	Values []string
 }
 
-// formField is one field of the form: a text field or a choice field.
+// formField is one field of the form: a text field, a choice field or a
+// multi-choice field.
 type formField struct {
 	isChoice bool
+	isMulti  bool
 	text     textField
 	choice   choiceField
+	multi    multiChoiceField
+	// multiErr is the error shown under a multi-choice field (FR-006).
+	multiErr string
+	// allAdded is the `All <items> are already added.` message of a
+	// multi-choice field, or "" (EC-006).
+	allAdded string
+	styles   addStyles
 }
 
 // focus gives the field the focus.
 //
 // In: none. Out: the focused field. Side effects: none.
 func (f formField) focus() formField {
-	if f.isChoice {
+	if f.isMulti {
+		f.multi = f.multi.Focus()
+	} else if f.isChoice {
 		f.choice = f.choice.Focus()
 	} else {
 		f.text = f.text.Focus()
@@ -55,7 +81,9 @@ func (f formField) focus() formField {
 //
 // In: none. Out: the unfocused field. Side effects: none.
 func (f formField) blur() formField {
-	if f.isChoice {
+	if f.isMulti {
+		f.multi = f.multi.Blur()
+	} else if f.isChoice {
 		f.choice = f.choice.Blur()
 	} else {
 		f.text = f.text.Blur()
@@ -65,8 +93,13 @@ func (f formField) blur() formField {
 
 // value returns the value as typed or selected.
 //
-// In: none. Out: the raw value. Side effects: none.
+// In: none. Out: the raw value; for a multi-choice field, the selected
+// choices joined with a newline (use values for the separate ones). Side
+// effects: none.
 func (f formField) value() string {
+	if f.isMulti {
+		return strings.Join(f.multi.Value(), "\n")
+	}
 	if f.isChoice {
 		return f.choice.Value()
 	}
@@ -77,6 +110,9 @@ func (f formField) value() string {
 //
 // In: space, the rows available to it. Out: its lines. Side effects: none.
 func (f formField) view(space int) []string {
+	if f.isMulti {
+		return append(f.multi.View(space-f.extraRows()), f.extraLines()...)
+	}
 	if f.isChoice {
 		return f.choice.View(space)
 	}
@@ -88,10 +124,40 @@ func (f formField) view(space int) []string {
 // In: none. Out: the height of its lines when drawn in full. Side effects:
 // none.
 func (f formField) height() int {
+	if f.isMulti {
+		return f.multi.Height() + f.extraRows()
+	}
 	if f.isChoice {
 		return f.choice.Height()
 	}
 	return len(f.text.View())
+}
+
+// extraRows returns the rows a multi-choice field adds below its checklist.
+//
+// In: none. Out: 1 if it shows an error or the all-added message, else 0.
+// Side effects: none.
+func (f formField) extraRows() int {
+	if f.multiErr != "" || f.allAdded != "" {
+		return 1
+	}
+	return 0
+}
+
+// extraLines returns the error or the all-added message of a multi-choice
+// field.
+//
+// In: none. Out: the one line, indented as the field, or none. Side
+// effects: none.
+func (f formField) extraLines() []string {
+	indent := strings.Repeat(" ", fieldIndent)
+	switch {
+	case f.allAdded != "":
+		return []string{f.styles.AllAdded.Render(truncate(indent+f.allAdded, f.multi.width))}
+	case f.multiErr != "":
+		return []string{f.styles.Error.Render(truncate(indent+f.multiErr, f.multi.width))}
+	}
+	return nil
 }
 
 // formModel is the model of the form screen of one feature (FR-011).
@@ -102,6 +168,9 @@ type formModel struct {
 	styles  addStyles
 	width   int
 	height  int
+	// direct reports that the form was opened without the selector, so
+	// `Esc` quits instead of going back (FR-005, EC-016).
+	direct bool
 }
 
 // newFormModel builds the form of a feature.
@@ -111,18 +180,29 @@ type formModel struct {
 // ANSI colour; width and height, the initial terminal size in cells.
 // Out: the model with one field per input in declaration order, filled from
 // values (empty, or the first choice, where none is given) and the focus on
-// the first field (FR-017).
+// the first field (FR-017). For a multi-choice input, which is the last,
+// every value from its position on is a selected choice. direct is false;
+// set it on the result to open the form without the selector.
 // Side effects: none.
 func newFormModel(feature Feature, values []string, styled bool, width, height int) formModel {
 	m := formModel{feature: feature, styles: newAddStyles(styled), width: width, height: height}
 	for i, in := range feature.Inputs {
-		f := formField{isChoice: len(in.Choices) > 0}
-		if f.isChoice {
+		f := formField{isChoice: len(in.Choices) > 0, styles: m.styles}
+		f.isMulti = f.isChoice && in.Multi
+		if f.isMulti {
+			f.multi = newMultiChoiceField(in, in.Added, styled, width)
+			if f.multi.AllAdded() && in.ItemNoun != "" {
+				f.allAdded = "All " + in.ItemNoun + " are already added."
+			}
+			if i < len(values) {
+				f.multi = f.multi.SetValue(values[i:])
+			}
+		} else if f.isChoice {
 			f.choice = newChoiceField(in, styled, width)
 		} else {
 			f.text = newTextField(in, styled, width)
 		}
-		if i < len(values) {
+		if i < len(values) && !f.isMulti {
 			if f.isChoice {
 				f.choice = f.choice.SetValue(values[i])
 			} else {
@@ -156,15 +236,21 @@ func (m formModel) layout() formLayout {
 
 // values returns the field values.
 //
-// In: trim, whether to trim the text values. Out: one value per field.
-// Side effects: none.
+// In: trim, whether to trim the text values. Out: one value per field,
+// except that a multi-choice field gives one value per selected choice, in
+// declaration order. Side effects: none.
 func (m formModel) values(trim bool) []string {
-	out := make([]string, len(m.fields))
-	for i, f := range m.fields {
-		out[i] = f.value()
-		if trim && !f.isChoice {
-			out[i] = strings.TrimSpace(out[i])
+	out := make([]string, 0, len(m.fields))
+	for _, f := range m.fields {
+		if f.isMulti {
+			out = append(out, f.multi.Value()...)
+			continue
 		}
+		v := f.value()
+		if trim && !f.isChoice {
+			v = strings.TrimSpace(v)
+		}
+		out = append(out, v)
 	}
 	return out
 }
@@ -173,8 +259,16 @@ func (m formModel) values(trim bool) []string {
 //
 // In: i, the field index. Out: the model with the field's error set, and
 // whether the field is valid. Choice fields are always valid. Side effects:
-// calls the input's validator.
+// calls the input's validator. A multi-choice field is invalid, with the
+// error `select at least one <input>`, when nothing is selected (FR-006).
 func (m formModel) validate(i int) (formModel, bool) {
+	if f := &m.fields[i]; f.isMulti {
+		f.multiErr = ""
+		if len(f.multi.Value()) == 0 {
+			f.multiErr = "select at least one " + f.multi.input.Name
+		}
+		return m, f.multiErr == ""
+	}
 	if m.fields[i].isChoice {
 		return m, true
 	}
@@ -212,7 +306,9 @@ func (m formModel) Update(msg tea.Msg) (formModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		for i := range m.fields {
-			if m.fields[i].isChoice {
+			if m.fields[i].isMulti {
+				m.fields[i].multi.width = msg.Width
+			} else if m.fields[i].isChoice {
 				m.fields[i].choice = m.fields[i].choice.resize(msg.Width)
 			} else {
 				m.fields[i].text = m.fields[i].text.resize(msg.Width)
@@ -236,6 +332,9 @@ func (m formModel) updateKey(msg tea.KeyMsg) (formModel, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc":
+		if m.direct {
+			return m, tea.Quit
+		}
 		v := m.values(false)
 		return m, func() tea.Msg { return formBackMsg{Values: v} }
 	case "shift+tab":
@@ -251,7 +350,7 @@ func (m formModel) updateKey(msg tea.KeyMsg) (formModel, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if msg.String() == "tab" {
+		if msg.String() == "tab" || m.fields[last].multi.AllAdded() && m.fields[last].isMulti {
 			return m, nil
 		}
 		return m.finish()
@@ -259,9 +358,13 @@ func (m formModel) updateKey(msg tea.KeyMsg) (formModel, tea.Cmd) {
 	if m.focus < 0 || m.focus > last {
 		return m, nil
 	}
-	if f := &m.fields[m.focus]; f.isChoice {
+	f := &m.fields[m.focus]
+	switch {
+	case f.isMulti:
+		f.multi = f.multi.Update(msg)
+	case f.isChoice:
 		f.choice = f.choice.Update(msg)
-	} else {
+	default:
 		f.text = f.text.Update(msg)
 	}
 	return m, nil
@@ -306,7 +409,9 @@ func (m formModel) updateMouse(msg tea.MouseMsg) formModel {
 			if i != m.focus {
 				m = m.moveFocus(i)
 			}
-			if f := &m.fields[i]; f.isChoice {
+			if f := &m.fields[i]; f.isMulti {
+				f.multi = f.multi.Click(msg.Y-row, l.AreaHeight-f.extraRows())
+			} else if f.isChoice {
 				f.choice = f.choice.Click(msg.Y-row, l.AreaHeight)
 			}
 			return m
@@ -321,8 +426,22 @@ func (m formModel) updateMouse(msg tea.MouseMsg) formModel {
 
 // footer returns the key hints for the focused field.
 //
-// In: none. Out: the footer text (FR-011). Side effects: none.
+// In: none. Out: the footer text (FR-011, FR-006, EC-006, EC-016). Side
+// effects: none.
 func (m formModel) footer() string {
+	esc := escBack
+	if m.direct {
+		esc = escQuit
+	}
+	if m.focus < len(m.fields) && m.fields[m.focus].isMulti {
+		switch f := m.fields[m.focus]; {
+		case f.multi.AllAdded():
+			return fmt.Sprintf(footerFormAllAdded, esc)
+		case len(m.fields) == 1:
+			return fmt.Sprintf(footerFormSolo, esc)
+		}
+		return fmt.Sprintf(footerFormMulti, "", esc)
+	}
 	base := footerFormNext
 	if m.focus == len(m.fields)-1 {
 		base = footerFormLast

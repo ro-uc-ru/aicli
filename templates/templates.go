@@ -10,3 +10,9 @@ import "embed"
 //
 //go:embed all:skeleton
 var Skeleton embed.FS
+
+// LLMProvider holds the templates of the `aicli add llm-provider` feature
+// (spec 005), rooted at the "llmprovider" directory.
+//
+//go:embed all:llmprovider
+var LLMProvider embed.FS

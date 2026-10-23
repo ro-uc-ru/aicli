@@ -1,0 +1,5 @@
+write file tests/test_llm_openai.py: boom
+could not remove:
+  app/ai/llm/openai.py
+could not restore:
+  pyproject.toml

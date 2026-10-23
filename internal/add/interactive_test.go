@@ -25,7 +25,7 @@ import (
 func stubScreens(t *testing.T, res tui.AddResult, err error) {
 	t.Helper()
 	old := runScreens
-	runScreens = func(context.Context, []tui.Feature, io.Reader, io.Writer, bool) (tui.AddResult, error) {
+	runScreens = func(context.Context, []tui.Feature, io.Reader, io.Writer, bool, ...tui.AddOption) (tui.AddResult, error) {
 		return res, err
 	}
 	t.Cleanup(func() { runScreens = old })

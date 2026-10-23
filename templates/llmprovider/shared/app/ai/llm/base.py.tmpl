@@ -1,0 +1,79 @@
+"""Shared types of the LLM providers: messages, capabilities and errors.
+
+No provider SDK is imported here. Each capability has its own protocol, which
+a provider client may implement or not.
+"""
+
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Literal, Protocol, runtime_checkable
+
+Role = Literal["user", "assistant"]
+
+
+@dataclass(frozen=True)
+class Message:
+    """One message of a conversation."""
+
+    role: Role
+    content: str
+
+
+@dataclass(frozen=True)
+class ProviderDescriptor:
+    """What a provider module declares about itself.
+
+    A module of this package is a provider module only if it exposes a
+    ``PROVIDER`` attribute holding one of these.
+
+    Attributes:
+        name: the provider name, as in the URL ``/llm/{name}/...``.
+        position: where the provider is listed; ties are broken by name.
+        required: the names of the variables the provider needs, in order.
+        load_settings: returns the value of each required variable, ``None``
+            when it is unset. It makes no network call.
+        make_client: builds the client of the provider from its settings.
+    """
+
+    name: str
+    position: int
+    required: tuple[str, ...]
+    load_settings: Callable[[], Mapping[str, str | None]]
+    make_client: Callable[[], object]
+
+
+class ProviderError(Exception):
+    """Base class of the errors raised by the LLM providers."""
+
+
+class ProviderNotFoundError(ProviderError):
+    """No added provider has the requested name."""
+
+
+class ProviderNotConfiguredError(ProviderError):
+    """The provider is added but some of its variables are missing."""
+
+
+class CapabilityNotImplementedError(ProviderError):
+    """The client of the provider does not implement the capability."""
+
+
+class ProviderCallError(ProviderError):
+    """The call to the provider failed."""
+
+
+@runtime_checkable
+class CompletionClient(Protocol):
+    """Capability: generate a text from a conversation."""
+
+    async def complete(
+        self,
+        messages: list[Message],
+        system: str | None = None,
+        max_tokens: int = 1024,
+    ) -> str:
+        """Return the text generated for ``messages``."""
+        ...
+
+
+# aicli:capabilities

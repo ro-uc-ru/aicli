@@ -164,7 +164,7 @@ func TestShowWriteError(t *testing.T) {
 // Covers: FR-005, EC-003
 func TestShowNoListedFeatureNeverInteractive(t *testing.T) {
 	old := runScreens
-	runScreens = func(context.Context, []tui.Feature, io.Reader, io.Writer, bool) (tui.AddResult, error) {
+	runScreens = func(context.Context, []tui.Feature, io.Reader, io.Writer, bool, ...tui.AddOption) (tui.AddResult, error) {
 		t.Error("the interactive screens must not start")
 		return tui.AddResult{}, nil
 	}
@@ -203,7 +203,7 @@ func TestShowNoListedFeatureNeverInteractive(t *testing.T) {
 func TestShowSignalWhileScreensShown(t *testing.T) {
 	old := runScreens
 	t.Cleanup(func() { runScreens = old })
-	runScreens = func(ctx context.Context, _ []tui.Feature, _ io.Reader, _ io.Writer, _ bool) (tui.AddResult, error) {
+	runScreens = func(ctx context.Context, _ []tui.Feature, _ io.Reader, _ io.Writer, _ bool, _ ...tui.AddOption) (tui.AddResult, error) {
 		<-ctx.Done()
 		return tui.AddResult{}, context.Cause(ctx)
 	}

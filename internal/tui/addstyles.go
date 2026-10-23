@@ -9,7 +9,7 @@ import (
 
 // addStyles holds the Lipgloss styles of the add screens (selector, form and
 // confirmation), one per row of the colour table of the add-screen design
-// (FR-008, FR-011, FR-016, FR-018).
+// (FR-006, FR-007, FR-008, FR-011, FR-016, FR-018).
 type addStyles struct {
 	// Header styles the headers `aicli › add` and `aicli › add › <feature>`.
 	Header lipgloss.Style
@@ -35,6 +35,21 @@ type addStyles struct {
 	Cancel lipgloss.Style
 	// Bold is applied to the focused button.
 	Bold lipgloss.Style
+	// CheckCursor styles the cursor `> ` of a multi-choice checklist and the
+	// choice under it (FR-006).
+	CheckCursor lipgloss.Style
+	// CheckSelected styles the marker `[x] ` and a selected choice (FR-006).
+	CheckSelected lipgloss.Style
+	// CheckUnselected styles the marker `[ ] ` and an unselected choice
+	// (FR-006).
+	CheckUnselected lipgloss.Style
+	// AlreadyAdded styles a whole `[✓] <choice> (already added)` line (FR-007).
+	AlreadyAdded lipgloss.Style
+	// AllAdded styles the `All … already added.` message (EC-006).
+	AllAdded lipgloss.Style
+	// WillUpdate styles the `Will update:` heading of the confirmation
+	// (FR-011).
+	WillUpdate lipgloss.Style
 }
 
 // newAddStyles builds the add screen styles.
@@ -49,7 +64,7 @@ func newAddStyles(styled bool) addStyles {
 	if !styled {
 		r.SetColorProfile(termenv.Ascii)
 		n := r.NewStyle()
-		return addStyles{n, n, n, n, n, n, n, n, n, n}
+		return addStyles{n, n, n, n, n, n, n, n, n, n, n, n, n, n, n, n}
 	}
 	r.SetColorProfile(termenv.ANSI256)
 	accent := lipgloss.Color("117")
@@ -66,6 +81,13 @@ func newAddStyles(styled bool) addStyles {
 		Add:          r.NewStyle().Foreground(lipgloss.Color("2")),
 		Cancel:       r.NewStyle().Foreground(lipgloss.Color("1")),
 		Bold:         r.NewStyle().Bold(true),
+
+		CheckCursor:     r.NewStyle().Foreground(accent).Bold(true),
+		CheckSelected:   r.NewStyle().Foreground(accent),
+		CheckUnselected: r.NewStyle().Foreground(normal),
+		AlreadyAdded:    r.NewStyle().Foreground(dim),
+		AllAdded:        r.NewStyle().Foreground(dim),
+		WillUpdate:      r.NewStyle().Foreground(dim),
 	}
 }
 

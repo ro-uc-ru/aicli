@@ -26,6 +26,15 @@ type Input struct {
 	// or "" if the value is valid. It is nil if the input has none. An input
 	// declares either Choices or Validator, never both.
 	Validator func(string) string
+	// Multi marks the input as multi-choice: it accepts one or more distinct
+	// values from Choices. Only the last input of a feature may be Multi.
+	Multi bool
+	// ItemNoun is the plural noun for the chosen values (e.g. "providers");
+	// empty if the input declares none. Only meaningful if Multi is true.
+	ItemNoun string
+	// ItemFiles maps a choice to its item file, a path that must be a create
+	// entry of the plan for any set of values including that choice.
+	ItemFiles map[string]string
 }
 
 // Declaration is everything a feature declares about itself (FR-003).
@@ -42,8 +51,10 @@ type Declaration struct {
 	// (one per input, trimmed). It returns the files or an error whose
 	// message is shown after "Error: ".
 	Plan func(values []string) ([]gen.FeatureFile, error)
-	// NextSteps are the one-line instructions printed after the files are created.
-	NextSteps []string
+	// NextSteps returns the one-line instructions printed after the files are
+	// created, from the input values (one per input, trimmed; the last holds
+	// every value of a multi-choice input).
+	NextSteps func(values []string) []string
 }
 
 var (
@@ -58,7 +69,8 @@ var (
 // In: decl, the feature declaration; it is copied, so later changes to the
 // caller's value do not affect the registered one.
 // Out: a command whose Use is "<name> <input-1> <input-2> ..." (each input
-// name wrapped in angle brackets), with Short and Long from decl, accepting
+// name wrapped in angle brackets, followed by "..." for a multi-choice
+// input), with Short and Long from decl, accepting
 // any number of arguments (the count is checked by ValidateValues, FR-006),
 // and a RunE that only calls Run with os.Getenv.
 // Side effects: stores the declaration in the package registry, keyed by the
@@ -68,7 +80,11 @@ func NewCommand(decl Declaration) *cobra.Command {
 	d.Inputs = append([]Input(nil), decl.Inputs...)
 	parts := []string{d.Name}
 	for _, in := range d.Inputs {
-		parts = append(parts, "<"+in.Name+">")
+		name := "<" + in.Name + ">"
+		if in.Multi {
+			name += "..."
+		}
+		parts = append(parts, name)
 	}
 	cmd := &cobra.Command{
 		Use:   strings.Join(parts, " "),

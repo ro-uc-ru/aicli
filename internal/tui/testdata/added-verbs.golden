@@ -1,0 +1,8 @@
+create  app/a.py
+skip    pyproject.toml
+update  .env.example
+
+Added feature-1
+
+Next steps:
+  uv sync

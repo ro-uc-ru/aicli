@@ -1,0 +1,17 @@
+skip    app/ai/llm/__init__.py
+skip    app/ai/llm/base.py
+skip    app/services/llm.py
+skip    app/schemas/llm.py
+create  app/api/routers/llm.py
+skip    tests/test_llm_router.py
+create  app/ai/llm/openai.py
+create  tests/test_llm_openai.py
+skip    app/api/router.py
+skip    pyproject.toml
+skip    .env.example
+
+Added llm-provider
+
+Next steps:
+  Run uv sync to install the provider SDKs
+  Set OPENAI_API_KEY, OPENAI_MODEL in .env

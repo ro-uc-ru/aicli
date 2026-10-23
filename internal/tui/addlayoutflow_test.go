@@ -23,6 +23,11 @@ func manyPaths(n int) tui.Feature {
 		}
 		return paths, nil
 	}
+	plan := f.Plan
+	f.Check = func(v []string) (tui.Preview, error) {
+		paths, err := plan(v)
+		return tui.Preview{Create: paths}, err
+	}
 	return f
 }
 
@@ -61,11 +66,11 @@ func repeat(k string, n int) []tea.Msg {
 }
 
 // TestAddLayoutFileListScrolls checks, on a short terminal, that the file
-// list scrolls under its fixed heading with `↓`/`↑` and `j`/`k`, with the
+// list scrolls, heading included, with `↓`/`↑` and `j`/`k`, with the
 // indicator lines, the `↑/↓ scroll` hint, the buttons always visible and the
 // screen never taller than the terminal.
 //
-// Covers: EC-010
+// Covers: FR-011, EC-010
 func TestAddLayoutFileListScrolls(t *testing.T) {
 	const h = 14
 	f := manyPaths(30)
@@ -84,8 +89,8 @@ func TestAddLayoutFileListScrolls(t *testing.T) {
 	}
 	for _, k := range []string{"down", "j"} {
 		v := sizedConfirm(t, f, termW, h, key(k))
-		if !strings.Contains(v, "↑ more") || strings.Contains(v, "file-01.txt") || !strings.Contains(v, "Will create:") {
-			t.Errorf("%s must scroll the paths under the heading:\n%s", k, v)
+		if !strings.Contains(v, "↑ more") || strings.Contains(v, "Will create:") {
+			t.Errorf("%s must scroll the heading and the paths together:\n%s", k, v)
 		}
 	}
 	bottom := sizedConfirm(t, f, termW, h, repeat("down", 60)...)

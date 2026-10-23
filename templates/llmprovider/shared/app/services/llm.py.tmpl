@@ -1,0 +1,80 @@
+"""Use cases of the LLM routes."""
+
+import logging
+
+from app.ai import llm as registry
+from app.ai.llm import base
+from app.schemas import llm as schemas
+
+logger = logging.getLogger(__name__)
+
+
+class ProviderNotFound(Exception):
+    """No added provider has the requested name."""
+
+
+class ProviderNotConfigured(Exception):
+    """The provider is added but some of its variables are missing."""
+
+
+class CapabilityNotImplemented(Exception):
+    """The client of the provider does not implement the capability."""
+
+
+class ProviderFailure(Exception):
+    """The call to the provider failed."""
+
+
+def health() -> schemas.LlmHealth:
+    """Report which added providers are configured, without any network call."""
+    providers = [
+        schemas.ProviderHealth(
+            name=p.name, configured=p.configured, missing=list(p.missing)
+        )
+        for p in registry.providers()
+    ]
+    status = "ok" if all(p.configured for p in providers) else "degraded"
+    return schemas.LlmHealth(status=status, providers=providers)
+
+
+def check_provider(provider: str) -> None:
+    """Raise ProviderNotFound if no added provider has this name."""
+    if not any(p.name == provider for p in registry.providers()):
+        raise ProviderNotFound(provider)
+
+
+async def complete(
+    provider: str, request: schemas.CompletionRequest
+) -> schemas.CompletionResponse:
+    """Generate a text with an added provider.
+
+    Raises:
+        ProviderNotFound: no added provider has this name.
+        ProviderNotConfigured: some of its variables are missing.
+        CapabilityNotImplemented: its client cannot do completions.
+        ProviderFailure: building the client or the call failed. Only the type
+            name of the cause is logged.
+    """
+    try:
+        client = registry.build_client(provider)
+    except base.ProviderNotFoundError:
+        raise ProviderNotFound(provider) from None
+    except base.ProviderNotConfiguredError:
+        raise ProviderNotConfigured(provider) from None
+    except Exception as exc:
+        logger.error("Provider failed: %s", type(exc).__name__)
+        raise ProviderFailure(provider) from None
+    if not registry.implements(client, base.CompletionClient):
+        raise CapabilityNotImplemented(provider)
+    messages = [base.Message(role=m.role, content=m.content) for m in request.messages]
+    try:
+        content = await client.complete(messages, request.system, request.max_tokens)
+    except Exception as exc:
+        logger.error("Provider failed: %s", type(exc).__name__)
+        raise ProviderFailure(provider) from None
+    return schemas.CompletionResponse(
+        provider=provider, model=getattr(client, "model", ""), content=content
+    )
+
+
+# aicli:services

@@ -3,14 +3,12 @@ package gen
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"text/template"
 )
 
@@ -25,6 +23,45 @@ type FeatureFile struct {
 	Template string
 	// Data is the value passed to the template; it holds at least the input values.
 	Data any
+	// Action is what the entry does to Path; the zero value is ActionCreate.
+	Action FileAction
+	// Marker is the marker name, without the "# aicli:" prefix, after which an
+	// ActionInject entry inserts its lines. It is unused by the other actions.
+	Marker string
+}
+
+// FileAction is the action of one plan entry on its path (FR-008).
+type FileAction int
+
+const (
+	// ActionCreate creates a new file and fails if the path exists (spec 004).
+	ActionCreate FileAction = iota
+	// ActionShared creates the file if it is missing and leaves an existing
+	// regular file untouched.
+	ActionShared
+	// ActionInject inserts the rendered lines after a marker of an existing file.
+	ActionInject
+)
+
+// Item is one value of a multi-choice input together with the item file that
+// records whether that value has already been added.
+type Item struct {
+	// Value is the choice, as declared by the feature.
+	Value string
+	// Path is the item file, relative to the project root, with "/" separators.
+	Path string
+}
+
+// Plan is everything a feature run does to a project: its entries in plan
+// order, plus the items of the given values used to detect values already added.
+type Plan struct {
+	// Entries are the file actions, in plan order.
+	Entries []FeatureFile
+	// ItemNoun is the plural noun naming the items in messages (e.g. "providers");
+	// empty when the feature has no multi-choice input.
+	ItemNoun string
+	// Items are the item files of the given values, in choice order.
+	Items []Item
 }
 
 // ValidateFeatureFiles checks every target path before anything is written
@@ -37,25 +74,85 @@ type FeatureFile struct {
 // gives "<feature> declares no files".
 // Side effects: none (it only resolves symbolic links and stats ancestors).
 func ValidateFeatureFiles(root, feature string, paths []string) error {
-	if len(paths) == 0 {
+	return ValidateEntries(root, feature, createEntries(paths))
+}
+
+// ValidateEntries checks the path of every plan entry before anything is
+// written, as ValidateFeatureFiles does, with the file actions of FR-008: the
+// same path may appear in several entries only if all of them are
+// ActionInject, and an ActionInject target that is a symbolic link must
+// resolve inside the project root (EC-014).
+//
+// In: root, the project root directory; feature, the feature name used in
+// messages; entries, the plan entries in plan order.
+// Out: nil if every path is valid; otherwise an error whose message is the
+// plain text after "Error: " and names the offending path. An empty list
+// gives "<feature> declares no files".
+// Side effects: none (it only resolves symbolic links and stats paths).
+func ValidateEntries(root, feature string, entries []FeatureFile) error {
+	if len(entries) == 0 {
 		return fmt.Errorf("%s declares no files", feature)
 	}
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return fmt.Errorf("cannot resolve project root %s: %w", root, err)
 	}
-	seen := make(map[string]bool, len(paths))
-	for _, p := range paths {
+	seen := make(map[string]FileAction, len(entries))
+	for _, e := range entries {
+		p := e.Path
 		if err := checkSyntax(p); err != nil {
 			return err
 		}
-		if seen[p] {
-			return fmt.Errorf("invalid path %q: listed more than once", p)
+		if prev, ok := seen[p]; ok {
+			if prev != ActionInject || e.Action != ActionInject {
+				return fmt.Errorf("invalid path %q: listed more than once", p)
+			}
+			continue
 		}
-		seen[p] = true
+		seen[p] = e.Action
 		if err := checkAncestors(realRoot, p); err != nil {
 			return err
 		}
+		if e.Action == ActionInject {
+			if err := checkInjectTarget(realRoot, p); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// checkInjectTarget checks that an injection target reached through a
+// symbolic link resolves inside the project root (EC-014). A missing target,
+// a broken link and a target that is not a link pass: whether the target
+// exists and is a regular file is checked later (FR-010).
+//
+// In: realRoot, the project root after filepath.EvalSymlinks; p, a path that
+// passed checkSyntax and checkAncestors.
+// Out: nil, or an error naming p when the link cannot be resolved or leads
+// outside the root.
+// Side effects: none (Lstat and EvalSymlinks only).
+func checkInjectTarget(realRoot, p string) error {
+	target := filepath.Join(realRoot, filepath.FromSlash(p))
+	info, err := os.Lstat(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("invalid path %q: %w", p, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return nil
+	}
+	resolved, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("invalid path %q: cannot resolve: %w", p, err)
+	}
+	if !within(realRoot, resolved) {
+		return fmt.Errorf("invalid path %q: resolves outside the project", p)
 	}
 	return nil
 }
@@ -138,7 +235,8 @@ func within(root, target string) bool {
 }
 
 // CheckFeatureFiles validates the target paths and checks that none of them
-// exists yet, without writing anything (FR-022, FR-023, SEC-5).
+// exists yet, without writing anything (FR-022, FR-023, SEC-5). It is
+// CheckPlan on a plan of ActionCreate entries only.
 //
 // In: root, the project root directory; feature, the feature name used in
 // messages; paths, the target paths relative to root, in plan order.
@@ -148,28 +246,25 @@ func within(root, target string) bool {
 // existing path, indented by two spaces, in list order.
 // Side effects: none (Lstat only).
 func CheckFeatureFiles(root, feature string, paths []string) error {
-	if err := ValidateFeatureFiles(root, feature, paths); err != nil {
-		return err
-	}
-	var existing []string
-	for _, p := range paths {
-		_, err := os.Lstat(filepath.Join(root, filepath.FromSlash(p)))
-		switch {
-		case err == nil:
-			existing = append(existing, p)
-		case os.IsNotExist(err):
-		default:
-			return fmt.Errorf("cannot check %q: %w", p, err)
-		}
-	}
-	if len(existing) == 0 {
-		return nil
-	}
-	return fmt.Errorf("cannot add %s, these files already exist:\n%s", feature, strings.Join(existing, "\n"))
+	_, err := CheckPlan(root, feature, Plan{Entries: createEntries(paths)})
+	return err
 }
 
-// FeatureFS is the filesystem interface of CreateFeatureFiles, injectable so
-// tests can force failures or race the existence check.
+// createEntries turns target paths into ActionCreate entries with no template.
+//
+// In: paths, the target paths in plan order.
+// Out: one entry per path, in the same order.
+// Side effects: none.
+func createEntries(paths []string) []FeatureFile {
+	entries := make([]FeatureFile, len(paths))
+	for i, p := range paths {
+		entries[i] = FeatureFile{Path: p}
+	}
+	return entries
+}
+
+// FeatureFS is the filesystem interface of CreateFeatureFiles and ApplyPlan,
+// injectable so tests can force failures or race the existence check.
 type FeatureFS interface {
 	// Lstat describes a path without following a final symbolic link.
 	// In: name, the path. Out: its info, or an error (os.IsNotExist if absent).
@@ -193,6 +288,14 @@ type FeatureFS interface {
 	// In: name, the path. Out: an error on failure.
 	// Side effects: deletes name.
 	Remove(name string) error
+	// ReadFile reads a whole file, following symbolic links.
+	// In: name, the path. Out: its content, or an error.
+	// Side effects: none.
+	ReadFile(name string) ([]byte, error)
+	// Stat describes a path, following symbolic links.
+	// In: name, the path. Out: its info, or an error (os.IsNotExist if absent).
+	// Side effects: none.
+	Stat(name string) (os.FileInfo, error)
 }
 
 // OSFeatureFS is the FeatureFS backed by the real filesystem.
@@ -223,7 +326,15 @@ func (OSFeatureFS) Chmod(name string, mode os.FileMode) error { return os.Chmod(
 // In: name, the path. Out: the os.Remove error. Side effects: deletes name.
 func (OSFeatureFS) Remove(name string) error { return os.Remove(name) }
 
-// createdPath is one path that a CreateFeatureFiles run created.
+// ReadFile implements FeatureFS with os.ReadFile.
+// In: name, the path. Out: the os.ReadFile result. Side effects: none.
+func (OSFeatureFS) ReadFile(name string) ([]byte, error) { return os.ReadFile(name) }
+
+// Stat implements FeatureFS with os.Stat.
+// In: name, the path. Out: the os.Stat result. Side effects: none.
+func (OSFeatureFS) Stat(name string) (os.FileInfo, error) { return os.Stat(name) }
+
+// createdPath is one path that createOne created.
 type createdPath struct {
 	// path is the full path on the filesystem.
 	path string
@@ -235,7 +346,8 @@ type createdPath struct {
 // all or nothing (FR-024, EC-023, SEC-5): it checks them, renders all of them
 // in memory, then creates the missing parent directories and each file, never
 // replacing one. On a create or write failure, or on cancellation, it removes
-// what this run created.
+// what this run created. It is ApplyPlan on a plan of ActionCreate entries
+// only; any Action or Marker of files is ignored.
 //
 // In: ctx, the run context, checked before each creation; fsys, the
 // filesystem to write through; root, the project root; feature, the feature
@@ -250,27 +362,18 @@ type createdPath struct {
 // root; on failure removes them again in reverse order, directories only
 // when empty, and nothing else.
 func CreateFeatureFiles(ctx context.Context, fsys FeatureFS, root, feature string, files []FeatureFile) ([]string, error) {
-	paths := make([]string, len(files))
+	entries := make([]FeatureFile, len(files))
 	for i, f := range files {
-		paths[i] = f.Path
+		f.Action, f.Marker = ActionCreate, ""
+		entries[i] = f
 	}
-	if err := CheckFeatureFiles(root, feature, paths); err != nil {
+	report, err := ApplyPlan(ctx, fsys, root, feature, Plan{Entries: entries})
+	if err != nil {
 		return nil, err
 	}
-	rendered := make([][]byte, len(files))
-	for i, f := range files {
-		b, err := renderFeatureFile(f)
-		if err != nil {
-			return nil, err
-		}
-		rendered[i] = b
-	}
-	var created []createdPath
-	for i, f := range files {
-		err := createOne(ctx, fsys, root, f.Path, rendered[i], &created)
-		if err != nil {
-			return nil, rollback(ctx, fsys, created, err)
-		}
+	paths := make([]string, len(report))
+	for i, l := range report {
+		paths[i] = l.Path
 	}
 	return paths, nil
 }
@@ -310,35 +413,11 @@ func createOne(ctx context.Context, fsys FeatureFS, root, rel string, content []
 	return writeFeatureFile(fsys, filepath.Join(root, filepath.FromSlash(rel)), rel, content, created)
 }
 
-// rollback removes the paths of a failed run in reverse order.
+// RenderEntry renders one plan entry in memory, as ApplyPlan does.
 //
-// In: ctx, the run context; fsys, the filesystem; created, what the run
-// created, in creation order; cause, the error that stopped the run.
-// Out: context.Cause(ctx) if ctx is cancelled; otherwise cause, with the
-// "could not remove:" continuation lines added when some path is left
-// behind. A directory that is not empty is kept silently, because something
-// else is inside it.
-// Side effects: removes files and empty directories.
-func rollback(ctx context.Context, fsys FeatureFS, created []createdPath, cause error) error {
-	var left []string
-	for i := len(created) - 1; i >= 0; i-- {
-		err := fsys.Remove(created[i].path)
-		if err == nil || errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
-			continue
-		}
-		left = append(left, created[i].rel)
-	}
-	if ctx.Err() != nil {
-		return context.Cause(ctx)
-	}
-	if len(left) == 0 {
-		return cause
-	}
-	for i, j := 0, len(left)-1; i < j; i, j = i+1, j-1 {
-		left[i], left[j] = left[j], left[i]
-	}
-	return fmt.Errorf("%w\ncould not remove:\n  %s", cause, strings.Join(left, "\n  "))
-}
+// In: f, the entry. Out: the rendered bytes, or an error naming f.Path and
+// the cause. Side effects: none.
+func RenderEntry(f FeatureFile) ([]byte, error) { return renderFeatureFile(f) }
 
 // renderFeatureFile renders one feature file in memory.
 //

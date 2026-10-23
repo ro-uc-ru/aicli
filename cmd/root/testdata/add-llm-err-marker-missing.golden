@@ -1,0 +1,1 @@
+Error: cannot add llm-provider, app/api/router.py has no "# aicli:router-imports" marker

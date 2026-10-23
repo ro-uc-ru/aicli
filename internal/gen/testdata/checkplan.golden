@@ -1,0 +1,34 @@
+== target-missing
+cannot add llm-provider, .env.example does not exist
+== target-broken-link
+cannot add llm-provider, pyproject.toml does not exist
+== target-directory
+cannot add llm-provider, .env.example is not a regular file
+== no-marker
+cannot add llm-provider, .env.example has no "# aicli:env" marker
+== repeated-marker
+cannot add llm-provider, pyproject.toml has more than one "# aicli:dependencies" marker
+== marker-before-items
+cannot add llm-provider, .env.example has no "# aicli:env" marker
+== added-file-dir-link
+cannot add llm-provider, these providers are already added:
+openai (app/ai/llm/openai.py)
+claude (app/ai/llm/claude.py)
+gemini (app/ai/llm/gemini.py)
+== added-mixed
+cannot add llm-provider, these providers are already added:
+openai (app/ai/llm/openai.py)
+== existing-fallback
+cannot add llm-provider, these files already exist:
+tests/test_llm_openai.py
+tests/test_llm_claude.py
+== shared-directory
+cannot add llm-provider, these files already exist:
+tests/test_llm_openai.py
+app/ai/llm/__init__.py
+== shared-broken-link
+cannot add llm-provider, these files already exist:
+app/ai/llm/__init__.py
+== shared-link-outside
+cannot add llm-provider, these files already exist:
+app/ai/llm/__init__.py

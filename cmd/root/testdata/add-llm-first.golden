@@ -1,0 +1,20 @@
+create  app/ai/llm/__init__.py
+create  app/ai/llm/base.py
+create  app/services/llm.py
+create  app/schemas/llm.py
+create  app/api/routers/llm.py
+create  tests/test_llm_router.py
+create  app/ai/llm/openai.py
+create  tests/test_llm_openai.py
+create  app/ai/llm/ollama.py
+create  tests/test_llm_ollama.py
+update  app/api/router.py
+update  pyproject.toml
+update  .env.example
+
+Added llm-provider
+
+Next steps:
+  Run uv sync to install the provider SDKs
+  Set OPENAI_API_KEY, OPENAI_MODEL in .env
+  Set OLLAMA_MODEL in .env

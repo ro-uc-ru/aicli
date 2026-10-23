@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -62,6 +63,25 @@ type AddModel struct {
 	// the length of the run (FR-017).
 	kept   map[int][]string
 	result AddResult
+	// direct reports that the program started on the form of one feature,
+	// with no selector to go back to (FR-005).
+	direct bool
+}
+
+// AddOption changes how the add program starts.
+type AddOption func(*AddModel)
+
+// WithDirect makes the program start on the form of one feature, in direct
+// mode: `Esc` in the form quits instead of returning to the selector
+// (FR-005, EC-016).
+//
+// In: index, the index of the feature in the features given to the program,
+// which must have inputs. Out: the option. Side effects: none.
+func WithDirect(index int) AddOption {
+	return func(m *AddModel) {
+		m.direct = true
+		m.current = index
+	}
 }
 
 // NewAddModel builds the add program model, showing the selector with the
@@ -71,10 +91,11 @@ type AddModel struct {
 // add ANSI colour; width and height, the initial terminal size in cells.
 // Out: the model; the terminal's own size replaces the initial one when
 // Bubble Tea reports it. Its result is ActionQuit until the user adds or
-// cancels.
-// Side effects: none.
-func NewAddModel(features []Feature, styled bool, width, height int) AddModel {
-	return AddModel{
+// cancels. With WithDirect it starts on the form of that feature instead of
+// the selector.
+// Side effects: calls the feature's Added function when starting on a form.
+func NewAddModel(features []Feature, styled bool, width, height int, opts ...AddOption) AddModel {
+	m := AddModel{
 		features: features,
 		styled:   styled,
 		width:    width,
@@ -83,6 +104,13 @@ func NewAddModel(features []Feature, styled bool, width, height int) AddModel {
 		kept:     map[int][]string{},
 		result:   AddResult{Action: ActionQuit},
 	}
+	for _, o := range opts {
+		o(&m)
+	}
+	if m.direct {
+		m.openForm(m.current)
+	}
+	return m
 }
 
 // Result returns how the program ended.
@@ -158,9 +186,30 @@ func (m AddModel) open(i int) (tea.Model, tea.Cmd) {
 		m.screen = screenConfirm
 		return m, cmd
 	}
-	m.form = newFormModel(f, m.kept[i], m.styled, m.width, m.height)
-	m.screen = screenForm
+	m.openForm(i)
 	return m, nil
+}
+
+// openForm shows the form of a feature that has inputs.
+//
+// In: i, the index of the feature. Out: none; the model shows the form,
+// filled from the values kept for it, with the direct flag of the program
+// and the already added choices of its multi-choice input read once from
+// the feature's Added function (FR-007). Side effects: calls Added.
+func (m *AddModel) openForm(i int) {
+	m.current = i
+	f := m.features[i]
+	if f.Added != nil {
+		f.Inputs = slices.Clone(f.Inputs)
+		for j := range f.Inputs {
+			if f.Inputs[j].Multi {
+				f.Inputs[j].Added = f.Added()
+			}
+		}
+	}
+	m.form = newFormModel(f, m.kept[i], m.styled, m.width, m.height)
+	m.form.direct = m.direct
+	m.screen = screenForm
 }
 
 // updateConfirm routes a message to the confirmation and acts on how it
@@ -205,9 +254,9 @@ func (m AddModel) View() string {
 //
 // In: ctx, the run context, whose cancellation stops the screens; features,
 // the features to list; in and out, the terminal input and output; styled,
-// whether to add ANSI colour.
+// whether to add ANSI colour; opts, as for NewAddModel.
 // Out: the result: ActionQuit when the user leaves with `q`, `Esc` or
-// `Ctrl+C`; ActionCancel or ActionAdd, with the feature index and, for add,
+// `Ctrl+C` (in direct mode `Esc` quits from the form too); ActionCancel or ActionAdd, with the feature index and, for add,
 // the trimmed values, from the confirmation. On error the result is the zero
 // value and the error is context.Cause(ctx) if ctx is cancelled (EC-020),
 // otherwise the failure to start or run the program, wrapped as `cannot
@@ -216,8 +265,8 @@ func (m AddModel) View() string {
 // Side effects: takes over the terminal on in and out, using the alternate
 // screen and cell-motion mouse reporting; installs no signal handler; calls
 // the features' Plan, Check and Command, which write nothing (FR-020).
-func RunAdd(ctx context.Context, features []Feature, in io.Reader, out io.Writer, styled bool) (AddResult, error) {
-	model := NewAddModel(features, styled, defaultWidth, defaultHeight)
+func RunAdd(ctx context.Context, features []Feature, in io.Reader, out io.Writer, styled bool, opts ...AddOption) (AddResult, error) {
+	model := NewAddModel(features, styled, defaultWidth, defaultHeight, opts...)
 	p := tea.NewProgram(model,
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),

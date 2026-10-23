@@ -1,0 +1,84 @@
+"""Ollama provider: settings and an async completion client.
+
+Ollama is reached through its OpenAI-compatible endpoint with the ``openai``
+SDK and a fixed placeholder key, so no other provider's key is ever sent to it.
+"""
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.ai.llm import base
+
+DEFAULT_BASE_URL = "http://localhost:11434/v1"
+PLACEHOLDER_KEY = "ollama"
+
+
+class Settings(BaseSettings):
+    """Settings read from OLLAMA_* variables and the root .env file."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="OLLAMA_", env_file=".env", extra="ignore"
+    )
+
+    model: str | None = None
+    base_url: str = DEFAULT_BASE_URL
+
+    @field_validator("base_url", mode="before")
+    @classmethod
+    def _default_when_blank(cls, value: object) -> object:
+        """Use the default URL when the value is unset, empty or blank."""
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return DEFAULT_BASE_URL
+        return value.strip() if isinstance(value, str) else value
+
+
+def _load_settings() -> dict[str, str | None]:
+    """Return the value of each required variable, ``None`` when unset."""
+    return {"OLLAMA_MODEL": Settings().model}
+
+
+class OllamaClient:
+    """Async client of an Ollama server through the OpenAI-compatible API."""
+
+    def __init__(self, model: str, base_url: str) -> None:
+        self.model = model
+        self.base_url = base_url
+
+    async def complete(
+        self,
+        messages: list[base.Message],
+        system: str | None = None,
+        max_tokens: int = 1024,
+    ) -> str:
+        """Return the text generated for ``messages``."""
+        import openai
+
+        turns = [{"role": m.role, "content": m.content} for m in messages]
+        if system:
+            turns.insert(0, {"role": "system", "content": system})
+        async with openai.AsyncOpenAI(
+            api_key=PLACEHOLDER_KEY,
+            base_url=self.base_url,
+            default_headers={"Authorization": f"Bearer {PLACEHOLDER_KEY}"},
+        ) as sdk:
+            response = await sdk.chat.completions.create(
+                model=self.model, messages=turns, max_tokens=max_tokens
+            )
+        return response.choices[0].message.content or ""
+
+    # aicli:methods
+
+
+def _make_client() -> OllamaClient:
+    """Build the client from the settings."""
+    settings = Settings()
+    return OllamaClient((settings.model or "").strip(), settings.base_url)
+
+
+PROVIDER = base.ProviderDescriptor(
+    name="ollama",
+    position=4,
+    required=("OLLAMA_MODEL",),
+    load_settings=_load_settings,
+    make_client=_make_client,
+)

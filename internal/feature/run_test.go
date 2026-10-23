@@ -36,7 +36,7 @@ func runFixture(t *testing.T, plan func([]string) ([]gen.FeatureFile, error)) (*
 			return ""
 		}}},
 		Plan:      plan,
-		NextSteps: []string{"do this"},
+		NextSteps: func([]string) []string { return []string{"do this"} },
 	})
 	return cmd, project.WithRoot(context.Background(), root), root
 }
@@ -127,5 +127,26 @@ func TestRunE(t *testing.T) {
 	}
 	if !strings.HasSuffix(out.String(), "Added feature-1\n\nNext steps:\n  do this\n") {
 		t.Fatalf("out = %q", out.String())
+	}
+}
+
+// TestRunNextStepsReceiveValues checks that NextSteps is called with the
+// trimmed input values and its result is printed.
+//
+// Covers: FR-014
+func TestRunNextStepsReceiveValues(t *testing.T) {
+	var got []string
+	cmd, ctx, _ := runFixture(t, nil)
+	d, _ := Lookup(cmd)
+	d.NextSteps = func(v []string) []string { got = v; return []string{"step for " + v[0]} }
+	var out bytes.Buffer
+	if err := Run(ctx, cmd, []string{" ok "}, &out, func(string) string { return "" }); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(got) != 1 || got[0] != "ok" {
+		t.Fatalf("NextSteps values = %q, want [ok]", got)
+	}
+	if !strings.Contains(out.String(), "step for ok") {
+		t.Fatalf("output lacks next step: %q", out.String())
 	}
 }

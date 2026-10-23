@@ -1,0 +1,2 @@
+Error: cannot add llm-provider, these files already exist:
+  tests/test_llm_claude.py

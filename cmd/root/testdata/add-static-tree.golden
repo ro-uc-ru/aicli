@@ -4,6 +4,7 @@ Add an AI/LLM feature to this project.
 feature-1          Add the main test feature
 feature-no-inputs  Test feature feature-no-inputs
 feature-no-short
+llm-provider       Add one or more LLM providers.
 機能-wide          広い説明 😀
 
 Run `aicli add <feature> --help` to see its inputs.

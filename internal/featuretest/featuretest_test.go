@@ -124,3 +124,94 @@ func TestNoNonTestFileImportsFeaturetest(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestMultiFeatureShapeAndContract checks that the valid multi-choice feature
+// passes the existing contract rules, that its usage line shows the input as
+// <input>..., and that its plan has the documented entries for any values.
+//
+// Covers: FR-001
+func TestMultiFeatureShapeAndContract(t *testing.T) {
+	add := NewTree(append(Valid(), NewMulti())...)
+	if errs := feature.CheckContract(add); len(errs) != 0 {
+		t.Fatalf("tree with the multi feature gave errors: %v", errs)
+	}
+	var cmd *cobra.Command
+	for _, c := range add.Commands() {
+		if c.Name() == Multi {
+			cmd = c
+		}
+	}
+	if cmd == nil {
+		t.Fatal("multi feature not registered")
+	}
+	cmd.InitDefaultHelpFlag()
+	if got, want := cmd.UseLine(), "aicli add "+Multi+" <"+MultiInput+">... [flags]"; got != want {
+		t.Fatalf("UseLine() = %q, want %q", got, want)
+	}
+	d := mustDecl(t, cmd)
+	in := d.Inputs[0]
+	if !in.Multi || in.ItemNoun != MultiNoun || len(in.ItemFiles) != len(MultiChoices) {
+		t.Fatalf("input = %+v", in)
+	}
+	files, err := d.Plan([]string{"alpha", "gamma"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, f := range files {
+		got = append(got, strconv.Itoa(int(f.Action))+" "+f.Path+" "+f.Marker)
+	}
+	want := []string{
+		"1 shared/one.txt ", "1 shared/two.txt ",
+		"0 items/alpha.txt ", "0 items/alpha.md ", "0 items/gamma.txt ", "0 items/gamma.md ",
+		"2 targets/a.txt first", "2 targets/b.txt second", "2 targets/a.txt first", "2 targets/b.txt second",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("entries = %q, want %q", got, want)
+	}
+	if steps := d.NextSteps([]string{"alpha", "gamma"}); len(steps) != 2 || steps[1] != "Set gamma in .env" {
+		t.Fatalf("steps = %q", steps)
+	}
+}
+
+// TestBrokenMultiFeaturesBuild checks that every rule-breaking multi-choice
+// feature is built with a declaration, a distinct name and a message.
+//
+// Covers: FR-001
+func TestBrokenMultiFeaturesBuild(t *testing.T) {
+	seen := map[string]bool{}
+	for _, b := range BrokenMultiFeatures() {
+		if _, ok := feature.Lookup(b.Cmd); !ok || b.Message == "" || seen[b.Cmd.Name()] {
+			t.Fatalf("broken feature %q is malformed", b.Rule)
+		}
+		seen[b.Cmd.Name()] = true
+	}
+	if len(seen) != 7 {
+		t.Fatalf("got %d broken multi-choice features, want 7", len(seen))
+	}
+}
+
+// TestBrokenMultiFeaturesGiveExactlyTheirRule checks that, next to the valid
+// features (the multi-choice one included), each rule-breaking multi-choice
+// feature gives exactly one error that names it and its rule, and that the
+// valid multi-choice feature gives none.
+//
+// Covers: FR-001
+func TestBrokenMultiFeaturesGiveExactlyTheirRule(t *testing.T) {
+	valid := append(Valid(), NewMulti())
+	if errs := feature.CheckContract(NewTree(valid...)); len(errs) != 0 {
+		t.Fatalf("valid tree gave errors: %v", errs)
+	}
+	for _, b := range BrokenMultiFeatures() {
+		t.Run(b.Rule, func(t *testing.T) {
+			errs := feature.CheckContract(NewTree(append(append([]*cobra.Command(nil), valid...), b.Cmd)...))
+			if len(errs) != 1 {
+				t.Fatalf("got %d errors %v, want 1", len(errs), errs)
+			}
+			msg := errs[0].Error()
+			if !strings.Contains(msg, "feature "+b.Cmd.Name()+":") || !strings.Contains(msg, b.Message) {
+				t.Fatalf("error %q does not name %s and %q", msg, b.Cmd.Name(), b.Message)
+			}
+		})
+	}
+}

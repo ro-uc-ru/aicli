@@ -1,0 +1,78 @@
+"""Gemini provider: settings and an async completion client."""
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.ai.llm import base
+
+BASE_URL = "https://generativelanguage.googleapis.com/"
+
+
+class Settings(BaseSettings):
+    """Settings read from GEMINI_* variables and the root .env file."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="GEMINI_", env_file=".env", extra="ignore"
+    )
+
+    api_key: str | None = None
+    model: str | None = None
+
+
+def _load_settings() -> dict[str, str | None]:
+    """Return the value of each required variable, ``None`` when unset."""
+    settings = Settings()
+    return {"GEMINI_API_KEY": settings.api_key, "GEMINI_MODEL": settings.model}
+
+
+class GeminiClient:
+    """Async client of the Gemini generate content API."""
+
+    def __init__(self, api_key: str, model: str) -> None:
+        self.api_key = api_key
+        self.model = model
+
+    async def complete(
+        self,
+        messages: list[base.Message],
+        system: str | None = None,
+        max_tokens: int = 1024,
+    ) -> str:
+        """Return the text generated for ``messages``."""
+        from google import genai
+
+        roles = {"user": "user", "assistant": "model"}
+        turns = [
+            {"role": roles[m.role], "parts": [{"text": m.content}]} for m in messages
+        ]
+        config = {"max_output_tokens": max_tokens}
+        if system:
+            config["system_instruction"] = system
+        sdk = genai.Client(
+            api_key=self.api_key,
+            vertexai=False,
+            http_options={"base_url": BASE_URL},
+        )
+        async with sdk.aio as client:
+            response = await client.models.generate_content(
+                model=self.model, contents=turns, config=config
+            )
+        return response.text or ""
+
+    # aicli:methods
+
+
+def _make_client() -> GeminiClient:
+    """Build the client from the settings."""
+    settings = Settings()
+    return GeminiClient(
+        (settings.api_key or "").strip(), (settings.model or "").strip()
+    )
+
+
+PROVIDER = base.ProviderDescriptor(
+    name="gemini",
+    position=3,
+    required=("GEMINI_API_KEY", "GEMINI_MODEL"),
+    load_settings=_load_settings,
+    make_client=_make_client,
+)

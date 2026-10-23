@@ -1,0 +1,17 @@
+[38;5;245mskip[0m    app/ai/llm/__init__.py
+[38;5;245mskip[0m    app/ai/llm/base.py
+[38;5;245mskip[0m    app/services/llm.py
+[38;5;245mskip[0m    app/schemas/llm.py
+[32mcreate[0m  app/api/routers/llm.py
+[38;5;245mskip[0m    tests/test_llm_router.py
+[32mcreate[0m  app/ai/llm/openai.py
+[32mcreate[0m  tests/test_llm_openai.py
+[38;5;245mskip[0m    app/api/router.py
+[38;5;245mskip[0m    pyproject.toml
+[38;5;245mskip[0m    .env.example
+
+[1;32m✓ Added llm-provider[0m
+
+[1;38;5;245mNext steps:[0m
+  [38;5;117mRun uv sync to install the provider SDKs[0m
+  [38;5;117mSet OPENAI_API_KEY, OPENAI_MODEL in .env[0m

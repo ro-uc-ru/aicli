@@ -1,0 +1,15 @@
+"""Aggregates the routers of the app."""
+
+from fastapi import APIRouter
+
+from app.api.routers import health
+
+# isort: off
+# aicli:router-imports
+from app.api.routers import llm
+# isort: on
+
+router = APIRouter()
+router.include_router(health.router)
+# aicli:routers
+router.include_router(llm.router)

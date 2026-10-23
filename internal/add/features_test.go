@@ -12,6 +12,7 @@ import (
 
 	"github.com/ro-uc-ru/aicli/internal/featuretest"
 	"github.com/ro-uc-ru/aicli/internal/project"
+	"github.com/ro-uc-ru/aicli/internal/tui"
 )
 
 // TestFeaturesOrderAndListing checks that all features come in Cobra order and
@@ -108,8 +109,9 @@ func TestFeaturesInputsPlanCheck(t *testing.T) {
 	if _, err := f.Plan([]string{featuretest.FailChoice, "x"}); err == nil || err.Error() != featuretest.PlanError {
 		t.Fatalf("Plan error = %v", err)
 	}
-	if err := f.Check(paths); err != nil {
-		t.Fatalf("Check on free paths = %v", err)
+	pv, err := f.Check([]string{"a", "x"})
+	if err != nil || !reflect.DeepEqual(pv, tui.Preview{Create: paths}) {
+		t.Fatalf("Check on free paths = %+v, %v", pv, err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "features"), 0o755); err != nil {
 		t.Fatal(err)
@@ -117,7 +119,7 @@ func TestFeaturesInputsPlanCheck(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "features", "x.md"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err = f.Check(paths)
+	_, err = f.Check([]string{"a", "x"})
 	if err == nil || !strings.Contains(err.Error(), "features/x.md") {
 		t.Fatalf("Check on existing file = %v", err)
 	}
@@ -132,7 +134,7 @@ func TestFeaturesInputsPlanCheck(t *testing.T) {
 // Covers: FR-002
 func TestFeaturesCheckWithoutRoot(t *testing.T) {
 	add := featuretest.NewTree(featuretest.NewMain())
-	if err := Features(add)[0].Check([]string{"a"}); err == nil {
+	if _, err := Features(add)[0].Check([]string{"a"}); err == nil {
 		t.Fatal("want an error without a root")
 	}
 }
@@ -145,5 +147,102 @@ func TestFeaturesSkipsUndeclared(t *testing.T) {
 	add.AddCommand(&cobra.Command{Use: "plain", Run: func(*cobra.Command, []string) {}})
 	if n := len(Features(add)); n != 1 {
 		t.Fatalf("got %d features, want 1", n)
+	}
+}
+
+// multiTree builds an add tree with the multi-choice test feature and a temp
+// project root holding both injection targets with their markers.
+//
+// In: t, the test. Out: the tree and the root. Side effects: writes the
+// target files under a temp dir and sets the tree context.
+func multiTree(t *testing.T) (*cobra.Command, string) {
+	t.Helper()
+	add := featuretest.NewTree(featuretest.NewMulti())
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "targets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for p, m := range map[string]string{featuretest.MultiTargetA: featuretest.MultiMarkerA, featuretest.MultiTargetB: featuretest.MultiMarkerB} {
+		if err := os.WriteFile(filepath.Join(root, p), []byte("top\n# aicli:"+m+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add.SetContext(project.WithRoot(context.Background(), root))
+	return add, root
+}
+
+// TestFeaturesMultiAddedAndCheck checks the multi-choice data of a feature,
+// that Added counts a file, a directory and a broken link as added, that
+// Check returns the preview of the plan and that neither writes.
+//
+// Covers: FR-007, FR-011, EC-005
+func TestFeaturesMultiAddedAndCheck(t *testing.T) {
+	add, root := multiTree(t)
+	f := Features(add)[0]
+	in := f.Inputs[0]
+	if !in.Multi || in.ItemNoun != featuretest.MultiNoun || !reflect.DeepEqual(in.Choices, featuretest.MultiChoices) {
+		t.Fatalf("input = %+v", in)
+	}
+	if got := f.Added(); !reflect.DeepEqual(got, []bool{false, false, false}) {
+		t.Fatalf("Added on empty project = %v", got)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "items"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, featuretest.MultiItemFile("alpha")), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, featuretest.MultiItemFile("beta")), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("missing", filepath.Join(root, featuretest.MultiItemFile("gamma"))); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.Added(); !reflect.DeepEqual(got, []bool{true, true, true}) {
+		t.Fatalf("Added = %v, want all true", got)
+	}
+	if err := os.Remove(filepath.Join(root, featuretest.MultiItemFile("alpha"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, featuretest.MultiItemFile("beta"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, featuretest.MultiItemFile("gamma"))); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshot(t, root)
+	pv, err := f.Check([]string{"alpha", "beta"})
+	if err != nil {
+		t.Fatalf("Check = %v", err)
+	}
+	want := tui.Preview{
+		Create: []string{"shared/one.txt", "shared/two.txt", "items/alpha.txt", "items/alpha.md", "items/beta.txt", "items/beta.md"},
+		Update: []string{featuretest.MultiTargetA, featuretest.MultiTargetB},
+	}
+	if !reflect.DeepEqual(pv, want) {
+		t.Fatalf("Check = %+v, want %+v", pv, want)
+	}
+	if after := snapshot(t, root); !reflect.DeepEqual(before, after) {
+		t.Fatalf("Check changed the tree:\n%v\n%v", before, after)
+	}
+	if err := os.WriteFile(filepath.Join(root, featuretest.MultiItemFile("beta")), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before = snapshot(t, root)
+	if _, err := f.Check([]string{"alpha", "beta"}); err == nil || !strings.Contains(err.Error(), "already added") {
+		t.Fatalf("Check with added item = %v", err)
+	}
+	if after := snapshot(t, root); !reflect.DeepEqual(before, after) {
+		t.Fatalf("Check changed the tree:\n%v\n%v", before, after)
+	}
+}
+
+// TestFeaturesAddedNilWithoutItems checks that a feature with no item files
+// has no Added function.
+//
+// Covers: FR-007
+func TestFeaturesAddedNilWithoutItems(t *testing.T) {
+	if f := Features(featuretest.NewTree(featuretest.NewMain()))[0]; f.Added != nil {
+		t.Fatal("Added is set for a feature with no item files")
 	}
 }

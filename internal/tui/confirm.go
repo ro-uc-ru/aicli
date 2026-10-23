@@ -17,8 +17,10 @@ const (
 	// hintScroll is added in front of the footer when the paths or the
 	// command scroll (EC-010).
 	hintScroll = "↑/↓ scroll · "
-	// headingCreate is the heading of the file list.
+	// headingCreate and headingUpdate are the headings of the two lists of
+	// the confirmation (FR-011).
 	headingCreate = "Will create:"
+	headingUpdate = "Will update:"
 	// plainErrorPrefix is the prefix of an error message, removed before it
 	// is shown in the confirmation.
 	plainErrorPrefix = "Error: "
@@ -48,10 +50,9 @@ type confirmModel struct {
 
 	// command is the wrapped equivalent command.
 	command []string
-	// heading and rest are the heading of the file list and its lines:
-	// `Will create:` and the indented paths, or, when blocked, the lines of
-	// the error.
-	heading string
+	// rest holds the rows of the list: `Will create:`, its indented paths, a
+	// blank row, `Will update:` and its indented paths (each heading only
+	// when it has paths), or, when blocked, the lines of the error.
 	rest    []string
 	blocked bool
 	// focusAdd is true when `Add` has the focus.
@@ -81,25 +82,47 @@ func newConfirmModel(feature Feature, values []string, styled bool, width, heigh
 		cmd = feature.Command(values)
 	}
 	m.command = wrapCommand(cmd, width)
-	var paths []string
+	var preview Preview
 	var err error
 	if feature.Plan != nil {
-		paths, err = feature.Plan(values)
+		preview.Create, err = feature.Plan(values)
 	}
 	if err == nil && feature.Check != nil {
-		err = feature.Check(paths)
+		preview, err = feature.Check(values)
 	}
 	if err != nil {
 		m.blocked = true
-		lines := errorLines(err)
-		m.heading, m.rest = lines[0], lines[1:]
+		m.rest = errorLines(err)
 		return m, tea.DisableMouse
 	}
-	m.heading = headingCreate
-	for _, p := range paths {
-		m.rest = append(m.rest, "  "+p)
-	}
+	m.rest = previewRows(preview)
 	return m, tea.DisableMouse
+}
+
+// previewRows lays out the two lists of the confirmation as rows.
+//
+// In: p, the preview. Out: `Will create:` and its paths indented by two
+// spaces, a blank row, `Will update:` and its paths; each heading only when
+// it has paths, and the blank row only when both are shown. Side effects:
+// none.
+func previewRows(p Preview) []string {
+	var rows []string
+	for _, l := range []struct {
+		heading string
+		paths   []string
+	}{{headingCreate, p.Create}, {headingUpdate, p.Update}} {
+		if len(l.paths) == 0 {
+			continue
+		}
+		if len(rows) > 0 {
+			rows = append(rows, "")
+		}
+		rows = append(rows, l.heading)
+		for _, path := range l.paths {
+			rows = append(rows, "  "+path)
+		}
+	}
+	return rows
 }
 
 // wrapCommand wraps the equivalent command to the width without cutting
@@ -122,13 +145,21 @@ func wrapCommand(cmd string, width int) []string {
 //
 // In: err, a non-nil error. Out: its message split into lines, without the
 // `Error: ` prefix and with the first letter capitalised; at least one line.
+// Every line after the first is indented by two spaces, as in the plain error
+// of ERR-5, unless the message already indented it.
 // Side effects: none.
 func errorLines(err error) []string {
 	msg := strings.TrimPrefix(err.Error(), plainErrorPrefix)
 	if r, n := utf8.DecodeRuneInString(msg); n > 0 {
 		msg = string(unicode.ToUpper(r)) + msg[n:]
 	}
-	return strings.Split(msg, "\n")
+	lines := strings.Split(msg, "\n")
+	for i := 1; i < len(lines); i++ {
+		if !strings.HasPrefix(lines[i], " ") {
+			lines[i] = "  " + lines[i]
+		}
+	}
+	return lines
 }
 
 // Result returns how the confirmation ended.
@@ -224,7 +255,7 @@ func (m confirmModel) updateKey(msg tea.KeyMsg) (confirmModel, tea.Cmd) {
 func (m confirmModel) scroll(delta int) confirmModel {
 	l := m.layout()
 	switch {
-	case l.List && l.PathRows < len(m.rest):
+	case l.List && l.ListRows < len(m.rest):
 		m.restOffset += delta
 	case l.CmdRows < len(m.command):
 		m.cmdOffset += delta
@@ -240,7 +271,7 @@ func (m confirmModel) clampOffsets() confirmModel {
 	m.cmdOffset = max(0, min(m.cmdOffset, len(m.command)-l.CmdRows))
 	rows := len(m.rest)
 	if l.List {
-		rows = l.PathRows
+		rows = l.ListRows
 	}
 	m.restOffset = max(0, min(m.restOffset, len(m.rest)-rows))
 	return m
@@ -276,11 +307,12 @@ func (m confirmModel) buttons() string {
 //
 // In: none.
 // Out: the screen text, without a trailing newline: the header, the
-// description, the visible command lines, a blank line, the heading, the
-// indicator line above, the visible list lines, the indicator line below,
+// description, the visible command lines, the indicator line above (blank
+// when nothing is hidden), the visible list rows, the indicator line below,
 // the buttons and the footer, each part only if the layout shows it. The
-// description, heading and list lines are truncated with `…`; the command
-// is never truncated. The error, when blocked, is in the error colour.
+// description and list rows are truncated with `…`; the command is never
+// truncated. The headings are dimmed and the error, when blocked, is in the
+// error colour.
 // Side effects: none.
 func (m confirmModel) View() string {
 	l := m.layout()
@@ -295,15 +327,15 @@ func (m confirmModel) View() string {
 		lines = append(lines, m.styles.Normal.Render(c))
 	}
 	if l.List {
-		lines = append(lines, "", m.headingLine(), m.indicator(m.restOffset > 0, moreAbove))
-		for i := m.restOffset; i < m.restOffset+l.PathRows; i++ {
+		lines = append(lines, m.indicator(m.restOffset > 0, moreAbove))
+		for i := m.restOffset; i < m.restOffset+l.ListRows; i++ {
 			if i < len(m.rest) {
 				lines = append(lines, m.restLine(m.rest[i]))
 			} else {
 				lines = append(lines, "")
 			}
 		}
-		lines = append(lines, m.indicator(m.restOffset+l.PathRows < len(m.rest), moreBelow))
+		lines = append(lines, m.indicator(m.restOffset+l.ListRows < len(m.rest), moreBelow))
 	}
 	lines = append(lines, m.buttons())
 	if l.Footer {
@@ -312,24 +344,19 @@ func (m confirmModel) View() string {
 	return strings.Join(lines, "\n")
 }
 
-// headingLine renders the heading of the file list.
-//
-// In: none. Out: `Will create:` dimmed, or the first line of the error in
-// the error colour. Side effects: none.
-func (m confirmModel) headingLine() string {
-	if m.blocked {
-		return m.styles.Error.Render(truncate(m.heading, m.width))
-	}
-	return m.styles.Dim.Render(truncate(m.heading, m.width))
-}
-
 // restLine renders one line of the file list.
 //
-// In: s, the line. Out: the truncated line in the normal colour, or in the
-// error colour when blocked. Side effects: none.
+// In: s, the row. Out: the truncated row in the normal colour, in the error
+// colour when blocked, or dimmed for a heading (`Will update:` in its own
+// style). Side effects: none.
 func (m confirmModel) restLine(s string) string {
-	if m.blocked {
+	switch {
+	case m.blocked:
 		return m.styles.Error.Render(truncate(s, m.width))
+	case s == headingCreate:
+		return m.styles.Dim.Render(truncate(s, m.width))
+	case s == headingUpdate:
+		return m.styles.WillUpdate.Render(truncate(s, m.width))
 	}
 	return m.styles.Normal.Render(truncate(s, m.width))
 }

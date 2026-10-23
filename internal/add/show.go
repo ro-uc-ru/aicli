@@ -85,6 +85,20 @@ func runInteractive(ctx context.Context, addCmd *cobra.Command, features []tui.F
 	if err != nil {
 		return err
 	}
+	return handleResult(ctx, addCmd, features, res, out, getenv)
+}
+
+// handleResult acts on how the add screens ended.
+//
+// In: ctx, the run context; addCmd, the `add` command; features, the features
+// the screens were given; res, their result; out and getenv, as for
+// runInteractive.
+// Out: nil for `quit` and `cancel`; for `add`, the error of the feature run,
+// or an error if the selected feature is out of range or not a subcommand of
+// addCmd.
+// Side effects: `cancel` writes "Nothing added." to out; `add` runs the
+// selected feature (see feature.Run).
+func handleResult(ctx context.Context, addCmd *cobra.Command, features []tui.Feature, res tui.AddResult, out io.Writer, getenv func(string) string) error {
 	switch res.Action {
 	case tui.ActionCancel:
 		if _, err := io.WriteString(out, cancelMessage); err != nil {

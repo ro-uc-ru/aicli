@@ -1,0 +1,75 @@
+"""OpenAI provider: settings and an async completion client."""
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.ai.llm import base
+
+BASE_URL = "https://api.openai.com/v1"
+
+
+class Settings(BaseSettings):
+    """Settings read from OPENAI_* variables and the root .env file."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="OPENAI_", env_file=".env", extra="ignore"
+    )
+
+    api_key: str | None = None
+    model: str | None = None
+
+
+def _load_settings() -> dict[str, str | None]:
+    """Return the value of each required variable, ``None`` when unset."""
+    settings = Settings()
+    return {"OPENAI_API_KEY": settings.api_key, "OPENAI_MODEL": settings.model}
+
+
+class OpenAIClient:
+    """Async client of the OpenAI chat completions API."""
+
+    def __init__(self, api_key: str, model: str) -> None:
+        self.api_key = api_key
+        self.model = model
+
+    async def complete(
+        self,
+        messages: list[base.Message],
+        system: str | None = None,
+        max_tokens: int = 1024,
+    ) -> str:
+        """Return the text generated for ``messages``."""
+        import openai
+
+        turns = [{"role": m.role, "content": m.content} for m in messages]
+        if system:
+            turns.insert(0, {"role": "system", "content": system})
+        async with openai.AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=BASE_URL,
+            default_headers={"Authorization": f"Bearer {self.api_key}"},
+        ) as sdk:
+            response = await sdk.chat.completions.create(
+                model=self.model,
+                messages=turns,
+                max_completion_tokens=max_tokens,
+            )
+        return response.choices[0].message.content or ""
+
+    # aicli:methods
+
+
+def _make_client() -> OpenAIClient:
+    """Build the client from the settings."""
+    settings = Settings()
+    return OpenAIClient(
+        (settings.api_key or "").strip(), (settings.model or "").strip()
+    )
+
+
+PROVIDER = base.ProviderDescriptor(
+    name="openai",
+    position=1,
+    required=("OPENAI_API_KEY", "OPENAI_MODEL"),
+    load_settings=_load_settings,
+    make_client=_make_client,
+)

@@ -273,3 +273,61 @@ func TestCreateFeatureFilesRace(t *testing.T) {
 		t.Errorf("b.txt left behind: %v", err)
 	}
 }
+
+// TestValidateEntriesActions checks the duplicate rules of the file actions
+// and the resolution of injection targets reached through symbolic links.
+//
+// Covers: FR-008, EC-014
+func TestValidateEntriesActions(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "router.py"), []byte("# aicli:routers\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "app", "router.py"), []byte("# aicli:routers\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "router.py"), filepath.Join(root, "app", "out.py")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "app", "router.py"), filepath.Join(root, "app", "in.py")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "missing.py"), filepath.Join(root, "app", "broken.py")); err != nil {
+		t.Fatal(err)
+	}
+	inject := func(p string) FeatureFile { return FeatureFile{Path: p, Action: ActionInject, Marker: "routers"} }
+	tests := []struct {
+		name    string
+		entries []FeatureFile
+		want    string
+	}{
+		{"two injects on one path", []FeatureFile{inject("app/router.py"), {Path: "app/x.py"}, inject("app/router.py")}, ""},
+		{"inject through inside link", []FeatureFile{inject("app/in.py")}, ""},
+		{"inject on broken link left to the check", []FeatureFile{inject("app/broken.py")}, ""},
+		{"inject on missing file left to the check", []FeatureFile{inject("app/none.py")}, ""},
+		{"create and inject", []FeatureFile{{Path: "app/router.py"}, inject("app/router.py")}, `invalid path "app/router.py": listed more than once`},
+		{"inject and create", []FeatureFile{inject("app/router.py"), {Path: "app/router.py"}}, `invalid path "app/router.py": listed more than once`},
+		{"shared duplicate", []FeatureFile{{Path: "app/s.py", Action: ActionShared}, {Path: "app/s.py", Action: ActionShared}}, `invalid path "app/s.py": listed more than once`},
+		{"shared and inject", []FeatureFile{{Path: "app/s.py", Action: ActionShared}, inject("app/s.py")}, `invalid path "app/s.py": listed more than once`},
+		{"inject link outside", []FeatureFile{inject("app/out.py")}, `invalid path "app/out.py": resolves outside the project`},
+		{"empty plan", nil, "demo declares no files"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateEntries(root, "demo", tt.entries)
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("got %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("got %v, want %q", err, tt.want)
+			}
+		})
+	}
+}

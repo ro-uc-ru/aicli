@@ -7,7 +7,8 @@
 Scaffolding for FastAPI backends for AI/LLM apps.
 Convention over configuration, driven by specs.
 
-add      Add an AI/LLM feature to this project.
+add               Add an AI/LLM feature to this project.
+add llm-provider  Add one or more LLM providers.
 guarded
-new      Create a new FastAPI project
+new               Create a new FastAPI project
 probe

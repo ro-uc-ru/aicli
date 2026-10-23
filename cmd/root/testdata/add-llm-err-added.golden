@@ -1,0 +1,2 @@
+Error: cannot add llm-provider, these providers are already added:
+  openai (app/ai/llm/openai.py)

@@ -7,6 +7,7 @@ package featuretest
 
 import (
 	"errors"
+	"strings"
 	"testing/fstest"
 
 	"github.com/spf13/cobra"
@@ -29,7 +30,29 @@ const (
 	Hidden = "feature-hidden"
 	// Deprecated is the name of the deprecated feature.
 	Deprecated = "feature-deprecated"
+	// Multi is the name of the valid multi-choice test feature.
+	Multi = "feature-multi"
 )
+
+// Shape of the multi-choice test feature.
+const (
+	// MultiInput is the name of its multi-choice input.
+	MultiInput = "item"
+	// MultiNoun is its plural item noun.
+	MultiNoun = "items"
+	// MultiMarkerA and MultiMarkerB are the markers its inject entries use,
+	// in MultiTargetA and MultiTargetB respectively.
+	MultiMarkerA = "first"
+	// MultiMarkerB is the second marker; see MultiMarkerA.
+	MultiMarkerB = "second"
+	// MultiTargetA is the file that holds MultiMarkerA.
+	MultiTargetA = "targets/a.txt"
+	// MultiTargetB is the file that holds MultiMarkerB.
+	MultiTargetB = "targets/b.txt"
+)
+
+// MultiChoices are the choices of the multi-choice test feature, in order.
+var MultiChoices = []string{"alpha", "beta", "gamma"}
 
 // Values of the main feature.
 const (
@@ -50,6 +73,11 @@ var NextSteps = []string{"Set FEATURE_KEY in .env", "Run uv sync"}
 var templates = fstest.MapFS{
 	"a.tmpl": {Data: []byte("a {{.Choice}} {{.Text}}\n")},
 	"b.tmpl": {Data: []byte("b {{.Text}}\n")},
+
+	"shared.tmpl":     {Data: []byte("shared\n")},
+	"shared-bad.tmpl": {Data: []byte("shared {{.Values}}\n")},
+	"item.tmpl":       {Data: []byte("item {{.Value}}\n")},
+	"inject.tmpl":     {Data: []byte("line {{.Value}}\n")},
 }
 
 // plan computes the two feature files of the main feature.
@@ -114,7 +142,7 @@ func NewMain() *cobra.Command {
 			{Name: "input-2", Description: "A text", Validator: validator},
 		},
 		Plan:      plan,
-		NextSteps: NextSteps,
+		NextSteps: func([]string) []string { return NextSteps },
 	})
 }
 
@@ -243,4 +271,135 @@ func NewTree(cmds ...*cobra.Command) *cobra.Command {
 	root.AddCommand(add)
 	Register(add, cmds...)
 	return add
+}
+
+// MultiItemFile returns the item file of a choice of the multi-choice feature.
+//
+// In: choice, one of MultiChoices. Out: "items/<choice>.txt". No side effects.
+func MultiItemFile(choice string) string { return "items/" + choice + ".txt" }
+
+// multiItemFiles maps each choice of MultiChoices to its item file.
+func multiItemFiles() map[string]string {
+	m := map[string]string{}
+	for _, c := range MultiChoices {
+		m[c] = MultiItemFile(c)
+	}
+	return m
+}
+
+// multiPlan computes the entries of the multi-choice feature.
+//
+// In: v, the values (the chosen items, in choice order). Out: two shared
+// entries ("shared/one.txt", "shared/two.txt"), then, per value, a create
+// entry for its item file and one for "items/<value>.md", then, per value,
+// one inject entry at MultiMarkerA of MultiTargetA and one at MultiMarkerB of
+// MultiTargetB. No side effects.
+func multiPlan(v []string) ([]gen.FeatureFile, error) {
+	return multiEntries(v, "shared.tmpl", nil), nil
+}
+
+// multiEntries builds the entries of the multi-choice feature.
+//
+// In: v, the values; sharedTmpl, the template of both shared entries (it may
+// render "{{.Values}}"); omitItem, the choices whose item file is left out of
+// the entries (nil for none). Out: the entries as in multiPlan.
+// No side effects.
+func multiEntries(v []string, sharedTmpl string, omitItem map[string]bool) []gen.FeatureFile {
+	all := map[string]string{"Values": strings.Join(v, ",")}
+	files := []gen.FeatureFile{
+		{Path: "shared/one.txt", Templates: templates, Template: sharedTmpl, Data: all, Action: gen.ActionShared},
+		{Path: "shared/two.txt", Templates: templates, Template: sharedTmpl, Data: all, Action: gen.ActionShared},
+	}
+	for _, x := range v {
+		d := map[string]string{"Value": x}
+		if !omitItem[x] {
+			files = append(files, gen.FeatureFile{Path: MultiItemFile(x), Templates: templates, Template: "item.tmpl", Data: d})
+		}
+		files = append(files, gen.FeatureFile{Path: "items/" + x + ".md", Templates: templates, Template: "item.tmpl", Data: d})
+	}
+	for _, x := range v {
+		d := map[string]string{"Value": x}
+		files = append(files,
+			gen.FeatureFile{Path: MultiTargetA, Templates: templates, Template: "inject.tmpl", Data: d, Action: gen.ActionInject, Marker: MultiMarkerA},
+			gen.FeatureFile{Path: MultiTargetB, Templates: templates, Template: "inject.tmpl", Data: d, Action: gen.ActionInject, Marker: MultiMarkerB})
+	}
+	return files
+}
+
+// multiNextSteps returns one next step per value.
+//
+// In: v, the values. Out: "Set <value> in .env" per value. No side effects.
+func multiNextSteps(v []string) []string {
+	var out []string
+	for _, x := range v {
+		out = append(out, "Set "+x+" in .env")
+	}
+	return out
+}
+
+// multiDecl returns a valid declaration of a multi-choice feature.
+//
+// In: name, the feature name. Out: the declaration: one multi-choice input
+// over MultiChoices with its item noun and item files, the multiPlan plan and
+// steps that depend on the values. No side effects.
+func multiDecl(name string) feature.Declaration {
+	return feature.Declaration{
+		Name:  name,
+		Short: "Test feature " + name,
+		Inputs: []feature.Input{{
+			Name: MultiInput, Description: "The items", Choices: MultiChoices,
+			Multi: true, ItemNoun: MultiNoun, ItemFiles: multiItemFiles(),
+		}},
+		Plan:      multiPlan,
+		NextSteps: multiNextSteps,
+	}
+}
+
+// NewMulti builds the valid multi-choice test feature: item files, two shared
+// entries, create entries per value and inject entries at two markers.
+//
+// In: none. Out: a new command named Multi. No side effects.
+func NewMulti() *cobra.Command { return feature.NewCommand(multiDecl(Multi)) }
+
+// BrokenMultiFeatures returns one new feature per multi-choice rule of the
+// contract (FR-001), each named "broken-multi-<n>" and breaking only its rule:
+// the multi-choice input is not the last; it has no choices; it has an empty
+// choice; it has a repeated choice; it has a validator; an item file is not a
+// create entry of the plan; a shared entry depends on the values.
+//
+// In: none. Out: the features. No side effects.
+func BrokenMultiFeatures() []Broken {
+	mk := func(name string, edit func(*feature.Declaration)) *cobra.Command {
+		d := multiDecl(name)
+		edit(&d)
+		return feature.NewCommand(d)
+	}
+	multi := func(d *feature.Declaration) *feature.Input { return &d.Inputs[len(d.Inputs)-1] }
+	return []Broken{
+		{"multi not last", "must be the last input", mk("broken-multi-not-last", func(d *feature.Declaration) {
+			d.Inputs = append(d.Inputs, feature.Input{Name: "extra"})
+		})},
+		{"multi no choices", "declares no choices", mk("broken-multi-no-choices", func(d *feature.Declaration) {
+			multi(d).Choices = nil
+		})},
+		{"multi empty choice", "declares an empty choice", mk("broken-multi-empty-choice", func(d *feature.Declaration) {
+			multi(d).Choices = []string{"alpha", ""}
+		})},
+		{"multi repeated choice", "twice", mk("broken-multi-repeated-choice", func(d *feature.Declaration) {
+			multi(d).Choices = []string{"alpha", "alpha"}
+		})},
+		{"multi validator", "both choices and a validator", mk("broken-multi-validator", func(d *feature.Declaration) {
+			multi(d).Validator = func(string) string { return "" }
+		})},
+		{"multi item file not created", "item file", mk("broken-multi-item-file", func(d *feature.Declaration) {
+			d.Plan = func(v []string) ([]gen.FeatureFile, error) {
+				return multiEntries(v, "shared.tmpl", map[string]bool{"beta": true}), nil
+			}
+		})},
+		{"multi shared depends on values", "depends on the values", mk("broken-multi-shared", func(d *feature.Declaration) {
+			d.Plan = func(v []string) ([]gen.FeatureFile, error) {
+				return multiEntries(v, "shared-bad.tmpl", nil), nil
+			}
+		})},
+	}
 }

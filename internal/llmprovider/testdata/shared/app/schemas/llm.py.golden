@@ -1,0 +1,46 @@
+"""Request and response models of the LLM routes."""
+
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+class Message(BaseModel):
+    """One message of a conversation."""
+
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class CompletionRequest(BaseModel):
+    """Body of ``POST /llm/{provider}/completion``."""
+
+    messages: list[Message] = Field(min_length=1)
+    system: str | None = None
+    max_tokens: int = Field(default=1024, ge=1, le=32768)
+
+
+class CompletionResponse(BaseModel):
+    """Answer of ``POST /llm/{provider}/completion``."""
+
+    provider: str
+    model: str
+    content: str
+
+
+class ProviderHealth(BaseModel):
+    """The state of one added provider."""
+
+    name: str
+    configured: bool
+    missing: list[str]
+
+
+class LlmHealth(BaseModel):
+    """Answer of ``GET /llm/health``."""
+
+    status: Literal["ok", "degraded"]
+    providers: list[ProviderHealth]
+
+
+# aicli:schemas

@@ -1,0 +1,89 @@
+"""Registry of the LLM providers added to this project.
+
+The providers are found at runtime among the modules of this package: a module
+is a provider module if it exposes a ``PROVIDER`` descriptor, and any other
+module is ignored. No provider SDK is imported here; each provider imports its
+own SDK when its client is built or used.
+"""
+
+import importlib
+import pkgutil
+from dataclasses import dataclass
+
+from app.ai.llm import base
+
+
+@dataclass(frozen=True)
+class ProviderStatus:
+    """The state of one added provider.
+
+    Attributes:
+        name: the provider name.
+        configured: whether every required variable has a value.
+        missing: the required variables without a value, in declared order.
+    """
+
+    name: str
+    configured: bool
+    missing: tuple[str, ...]
+
+
+def _descriptors() -> list[base.ProviderDescriptor]:
+    """Return the descriptors of the added providers, in listing order.
+
+    When two modules declare the same name, only the module named after the
+    provider is used, and both are ignored if neither is. Providers are sorted
+    by position, then by name.
+    """
+    by_name: dict[str, list[tuple[str, base.ProviderDescriptor]]] = {}
+    for info in pkgutil.iter_modules(__path__):
+        module = importlib.import_module(f"{__name__}.{info.name}")
+        descriptor = getattr(module, "PROVIDER", None)
+        if isinstance(descriptor, base.ProviderDescriptor):
+            by_name.setdefault(descriptor.name, []).append((info.name, descriptor))
+    found = []
+    for name, candidates in by_name.items():
+        found.extend(d for module_name, d in candidates if module_name == name)
+    return sorted(found, key=lambda d: (d.position, d.name))
+
+
+def _missing(descriptor: base.ProviderDescriptor) -> tuple[str, ...]:
+    """Return the required variables of a provider that have no value.
+
+    A value that is unset, empty or whitespace only counts as missing.
+    """
+    values = descriptor.load_settings()
+    return tuple(
+        variable
+        for variable in descriptor.required
+        if not (values.get(variable) or "").strip()
+    )
+
+
+def providers() -> list[ProviderStatus]:
+    """Return the state of every added provider, in listing order."""
+    result = []
+    for descriptor in _descriptors():
+        missing = _missing(descriptor)
+        result.append(ProviderStatus(descriptor.name, not missing, missing))
+    return result
+
+
+def build_client(name: str) -> object:
+    """Build the client of an added, configured provider.
+
+    Raises:
+        base.ProviderNotFoundError: no added provider has this name.
+        base.ProviderNotConfiguredError: some of its variables are missing.
+    """
+    for descriptor in _descriptors():
+        if descriptor.name == name:
+            if _missing(descriptor):
+                raise base.ProviderNotConfiguredError(name)
+            return descriptor.make_client()
+    raise base.ProviderNotFoundError(name)
+
+
+def implements(client: object, capability: type) -> bool:
+    """Return whether a client implements a capability protocol."""
+    return isinstance(client, capability)

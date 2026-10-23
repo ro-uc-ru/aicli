@@ -28,7 +28,9 @@ func confirmFeature(check, plan error, noInputs bool) tui.Feature {
 			}
 			return []string{"features/one.txt", "features/two.md"}, nil
 		},
-		Check:   func([]string) error { return check },
+		Check: func([]string) (tui.Preview, error) {
+			return tui.Preview{Create: []string{"features/one.txt", "features/two.md"}}, check
+		},
 		Command: func(v []string) string { return "aicli add feature-1 -- " + strings.Join(v, " ") },
 	}
 	if noInputs {
@@ -74,7 +76,6 @@ func TestAddConfirmScreen(t *testing.T) {
 		"aicli add feature-1 -- val",
 		"",
 		"Will create:",
-		"",
 		"  features/one.txt",
 		"  features/two.md",
 	}
@@ -178,7 +179,7 @@ func TestAddConfirmBlocked(t *testing.T) {
 		f    tui.Feature
 		want []string
 	}{
-		"existing files": {confirmFeature(exists, nil, false), []string{"Cannot add feature-1, these files already exist:", "features/one.txt", "features/two.md"}},
+		"existing files": {confirmFeature(exists, nil, false), []string{"Cannot add feature-1, these files already exist:", "\n  features/one.txt", "\n  features/two.md"}},
 		"failing plan":   {confirmFeature(nil, errors.New("the plan failed"), false), []string{"The plan failed"}},
 	}
 	for name, c := range cases {

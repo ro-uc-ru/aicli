@@ -1,0 +1,36 @@
+== none
+feature-m requires label
+Usage: aicli add feature-m <label> <item>... [flags]
+== no-multi-value
+feature-m requires item
+Usage: aicli add feature-m <label> <item>... [flags]
+== repeated
+item "openai" is given more than once
+Usage: aicli add feature-m <label> <item>... [flags]
+== repeated-trimmed
+item "openai" is given more than once
+Usage: aicli add feature-m <label> <item>... [flags]
+== repeated-first-named
+item "openai" is given more than once
+Usage: aicli add feature-m <label> <item>... [flags]
+== case
+item must be one of: openai, claude, gemini, ollama
+Usage: aicli add feature-m <label> <item>... [flags]
+== vendor
+item must be one of: openai, claude, gemini, ollama
+Usage: aicli add feature-m <label> <item>... [flags]
+== product
+item must be one of: openai, claude, gemini, ollama
+Usage: aicli add feature-m <label> <item>... [flags]
+== empty
+item cannot be empty
+Usage: aicli add feature-m <label> <item>... [flags]
+== control
+item contains control characters
+Usage: aicli add feature-m <label> <item>... [flags]
+== unknown-before-repeat
+item must be one of: openai, claude, gemini, ollama
+Usage: aicli add feature-m <label> <item>... [flags]
+== empty-label
+label cannot be empty
+Usage: aicli add feature-m <label> <item>... [flags]

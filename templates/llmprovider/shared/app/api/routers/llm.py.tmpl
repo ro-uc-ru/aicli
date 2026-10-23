@@ -1,0 +1,81 @@
+"""LLM routes: they only translate HTTP and call the use cases."""
+
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import ValidationError
+
+from app.schemas import llm as schemas
+from app.schemas.errors import ErrorModel
+from app.services import llm as services
+
+router = APIRouter(prefix="/llm")
+
+
+def _inline(schema: dict) -> dict:
+    """Return a JSON schema with its ``$defs`` references replaced in place."""
+    defs = schema.get("$defs", {})
+
+    def resolve(node):
+        if isinstance(node, dict):
+            if "$ref" in node:
+                return resolve(defs[node["$ref"].rsplit("/", 1)[-1]])
+            return {k: resolve(v) for k, v in node.items() if k != "$defs"}
+        if isinstance(node, list):
+            return [resolve(item) for item in node]
+        return node
+
+    return resolve(schema)
+
+
+COMPLETION_BODY = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "application/json": {
+                "schema": _inline(schemas.CompletionRequest.model_json_schema())
+            }
+        },
+    }
+}
+
+ERRORS = {status: {"model": ErrorModel} for status in (404, 422, 501, 502, 503)}
+
+
+@router.get("/health", response_model=schemas.LlmHealth)
+def health() -> schemas.LlmHealth:
+    """Report which added providers are configured."""
+    return services.health()
+
+
+@router.post(
+    "/{provider}/completion",
+    response_model=schemas.CompletionResponse,
+    responses=ERRORS,
+    openapi_extra=COMPLETION_BODY,
+)
+async def completion(provider: str, request: Request) -> schemas.CompletionResponse:
+    """Generate a text with a provider.
+
+    The provider is free text and the body is read raw, so that an unknown
+    provider answers 404 before the body is validated.
+    """
+    try:
+        services.check_provider(provider)
+    except services.ProviderNotFound:
+        raise HTTPException(status_code=404) from None
+    try:
+        body = schemas.CompletionRequest.model_validate_json(await request.body())
+    except ValidationError:
+        raise HTTPException(status_code=422) from None
+    try:
+        return await services.complete(provider, body)
+    except services.ProviderNotFound:
+        raise HTTPException(status_code=404) from None
+    except services.ProviderNotConfigured:
+        raise HTTPException(status_code=503) from None
+    except services.CapabilityNotImplemented:
+        raise HTTPException(status_code=501) from None
+    except services.ProviderFailure:
+        raise HTTPException(status_code=502) from None
+
+
+# aicli:routes

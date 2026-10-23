@@ -1,0 +1,338 @@
+"""Tests of the LLM routes and of the provider registry, with fake providers.
+
+They make no network call and need no provider SDK. Every provider variable is
+unset and the project's .env is not read, whatever the developer's environment.
+"""
+
+import importlib
+import logging
+import os
+import sys
+from collections.abc import Callable
+from pathlib import Path
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.ai import llm as registry
+from app.api.routers import llm as llm_router
+from app.errors import register_error_handlers
+
+PREFIXES = ("OPENAI_", "ANTHROPIC_", "GEMINI_", "GOOGLE_", "OLLAMA_")
+
+PROVIDER_TEMPLATE = """\
+import os
+
+from app.ai.llm import base
+
+REPLY = %(reply)r
+
+
+%(client)s
+
+
+PROVIDER = base.ProviderDescriptor(
+    name=%(name)r,
+    position=%(position)d,
+    required=%(required)r,
+    load_settings=lambda: {v: os.environ.get(v) for v in %(required)r},
+    make_client=Client,
+)
+"""
+
+CLIENTS = {
+    "ok": """\
+class Client:
+    model = "fake-model"
+
+    async def complete(self, messages, system=None, max_tokens=1024):
+        return REPLY + messages[-1].content
+""",
+    "nocap": """\
+class Client:
+    model = "fake-model"
+""",
+    "boom": """\
+class Client:
+    model = "fake-model"
+
+    async def complete(self, messages, system=None, max_tokens=1024):
+        raise RuntimeError("secret-key-value")
+""",
+}
+
+BODY = {"messages": [{"role": "user", "content": "hello"}]}
+
+AddProvider = Callable[..., None]
+
+
+@pytest.fixture(autouse=True)
+def isolated_environment(tmp_path, monkeypatch):
+    """Unset every provider variable and keep the project's .env out of reach."""
+    for name in list(os.environ):
+        if name.startswith(PREFIXES):
+            monkeypatch.delenv(name)
+    monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture
+def add_provider(tmp_path, monkeypatch) -> AddProvider:
+    """Make the registry look only at a temporary package directory.
+
+    Returns a function that writes a module there. Modules imported during the
+    test are forgotten afterwards.
+    """
+    folder = tmp_path / "providers"
+    folder.mkdir()
+    monkeypatch.setattr(registry, "__path__", [str(folder)])
+    before = set(sys.modules)
+
+    def add(
+        name: str,
+        position: int = 1,
+        required: tuple[str, ...] = (),
+        client: str = "ok",
+        reply: str = "echo:",
+        module: str | None = None,
+        source: str | None = None,
+    ) -> None:
+        text = source or PROVIDER_TEMPLATE % {
+            "reply": reply,
+            "client": CLIENTS[client],
+            "name": name,
+            "position": position,
+            "required": required,
+        }
+        (folder / f"{module or name}.py").write_text(text)
+        importlib.invalidate_caches()
+
+    yield add
+    for name in set(sys.modules) - before:
+        del sys.modules[name]
+
+
+@pytest.fixture
+def http() -> TestClient:
+    """Test client of an app that only has the LLM router."""
+    app = FastAPI()
+    app.include_router(llm_router.router)
+    register_error_handlers(app)
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def post(http: TestClient, provider: str, body=None, **kwargs):
+    """Send a completion request."""
+    return http.post(
+        f"/llm/{provider}/completion", json=BODY if body is None else body, **kwargs
+    )
+
+
+def test_health_without_providers(add_provider, http):
+    """With no provider added the status is ok and the list is empty."""
+    response = http.get("/llm/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "providers": []}
+
+
+def test_health_degraded_in_declared_order_without_values(
+    add_provider, http, monkeypatch
+):
+    """Providers are listed by position and only missing names are shown."""
+    add_provider("later", position=2, required=("LATER_KEY", "LATER_MODEL"))
+    add_provider("first", position=1, required=("FIRST_KEY",))
+    monkeypatch.setenv("FIRST_KEY", "very-secret-value")
+    response = http.get("/llm/health")
+    assert response.json() == {
+        "status": "degraded",
+        "providers": [
+            {"name": "first", "configured": True, "missing": []},
+            {
+                "name": "later",
+                "configured": False,
+                "missing": ["LATER_KEY", "LATER_MODEL"],
+            },
+        ],
+    }
+    assert "very-secret-value" not in response.text
+
+
+def test_health_ok_when_every_provider_is_configured(add_provider, http, monkeypatch):
+    """The status is ok when every added provider is configured."""
+    add_provider("one", required=("ONE_KEY",))
+    monkeypatch.setenv("ONE_KEY", "x")
+    assert http.get("/llm/health").json()["status"] == "ok"
+
+
+def test_completion_returns_provider_model_and_content(add_provider, http, monkeypatch):
+    """A valid request to a configured provider answers 200."""
+    add_provider("one", required=("ONE_KEY",))
+    monkeypatch.setenv("ONE_KEY", "x")
+    response = post(http, "one")
+    assert response.status_code == 200
+    assert response.json() == {
+        "provider": "one",
+        "model": "fake-model",
+        "content": "echo:hello",
+    }
+
+
+def test_unknown_provider_is_404_even_with_an_invalid_body(add_provider, http):
+    """The provider is checked before the body."""
+    assert post(http, "nothing").status_code == 404
+    assert post(http, "nothing", {"messages": []}).json() == {
+        "status": 404,
+        "message": "Not Found",
+    }
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"messages": []},
+        {"messages": [{"role": "system", "content": "x"}]},
+        {**BODY, "max_tokens": 0},
+        {**BODY, "max_tokens": 32769},
+        {},
+    ],
+)
+def test_invalid_body_is_422(add_provider, http, monkeypatch, body):
+    """An empty list, a bad role or max_tokens out of range are rejected."""
+    add_provider("one", required=("ONE_KEY",))
+    monkeypatch.setenv("ONE_KEY", "x")
+    assert post(http, "one", body).status_code == 422
+
+
+def test_body_that_is_not_json_is_422(add_provider, http):
+    """A body that is not JSON is rejected with 422."""
+    add_provider("one")
+    response = http.post("/llm/one/completion", content=b"not json")
+    assert response.status_code == 422
+
+
+def test_max_tokens_limits_are_accepted(add_provider, http, monkeypatch):
+    """1 and 32768 are valid values."""
+    add_provider("one", required=("ONE_KEY",))
+    monkeypatch.setenv("ONE_KEY", "x")
+    assert post(http, "one", {**BODY, "max_tokens": 1}).status_code == 200
+    assert post(http, "one", {**BODY, "max_tokens": 32768}).status_code == 200
+
+
+def test_not_configured_is_503_and_invalid_body_wins(add_provider, http):
+    """503 for a missing variable, but 422 comes first for a bad body."""
+    add_provider("one", required=("ONE_KEY",))
+    assert post(http, "one").json() == {
+        "status": 503,
+        "message": "Service Unavailable",
+    }
+    assert post(http, "one", {"messages": []}).status_code == 422
+
+
+def test_whitespace_only_value_counts_as_missing(add_provider, http, monkeypatch):
+    """A value of spaces is missing in the health report and gives 503."""
+    add_provider("one", required=("ONE_KEY",))
+    monkeypatch.setenv("ONE_KEY", "   ")
+    health = http.get("/llm/health").json()
+    assert health["providers"][0]["missing"] == ["ONE_KEY"]
+    assert post(http, "one").status_code == 503
+
+
+def test_client_without_the_capability_is_501(add_provider, http, monkeypatch):
+    """A configured provider whose client cannot complete answers 501."""
+    add_provider("plain", required=("PLAIN_KEY",), client="nocap")
+    monkeypatch.setenv("PLAIN_KEY", "x")
+    assert post(http, "plain").json() == {"status": 501, "message": "Not Implemented"}
+    assert post(http, "plain", {"messages": []}).status_code == 422
+
+
+def test_not_configured_wins_over_missing_capability(add_provider, http):
+    """503 comes before 501."""
+    add_provider("plain", required=("PLAIN_KEY",), client="nocap")
+    assert post(http, "plain").status_code == 503
+
+
+def test_provider_failure_is_502_and_only_the_type_is_logged(
+    add_provider, http, monkeypatch, caplog
+):
+    """A failing call answers 502 without leaking the error or the messages."""
+    add_provider("bad", required=("BAD_KEY",), client="boom")
+    monkeypatch.setenv("BAD_KEY", "x")
+    with caplog.at_level(logging.INFO):
+        response = post(
+            http, "bad", {"messages": [{"role": "user", "content": "private"}]}
+        )
+    assert response.json() == {"status": 502, "message": "Bad Gateway"}
+    assert "RuntimeError" in caplog.text
+    assert "secret-key-value" not in caplog.text
+    assert "private" not in caplog.text
+
+
+def test_module_that_is_not_a_provider_is_ignored(add_provider, http):
+    """A helper module written by the user is not listed."""
+    add_provider("one")
+    add_provider("utils", source="VALUE = 1\n")
+    names = [p["name"] for p in http.get("/llm/health").json()["providers"]]
+    assert names == ["one"]
+
+
+def test_user_module_outside_the_choices_is_found(add_provider, http, monkeypatch):
+    """A provider module such as mistral is listed at its position."""
+    add_provider("one", position=1)
+    add_provider("mistral", position=2, required=("MISTRAL_KEY",), reply="m:")
+    add_provider("zeta", position=3)
+    names = [p["name"] for p in http.get("/llm/health").json()["providers"]]
+    assert names == ["one", "mistral", "zeta"]
+    monkeypatch.setenv("MISTRAL_KEY", "x")
+    assert post(http, "mistral").json()["content"] == "m:hello"
+
+
+def test_duplicate_names_use_only_the_module_named_after_the_provider(
+    add_provider, http
+):
+    """openai_old.py is ignored in favour of openai.py."""
+    add_provider("dup", reply="new:")
+    add_provider("dup", reply="old:", module="dup_old")
+    response = post(http, "dup")
+    assert response.json()["content"] == "new:hello"
+    assert len(http.get("/llm/health").json()["providers"]) == 1
+
+
+def test_duplicate_names_without_the_named_module_are_ignored(add_provider, http):
+    """If neither module is named after the provider, both are ignored."""
+    add_provider("dup", module="copy_a")
+    add_provider("dup", module="copy_b")
+    assert http.get("/llm/health").json()["providers"] == []
+    assert post(http, "dup").status_code == 404
+
+
+def test_tied_positions_are_sorted_by_name(add_provider, http):
+    """Providers at the same position are listed alphabetically."""
+    add_provider("beta", position=1)
+    add_provider("alpha", position=1)
+    add_provider("gamma", position=1)
+    names = [p["name"] for p in http.get("/llm/health").json()["providers"]]
+    assert names == ["alpha", "beta", "gamma"]
+
+
+def test_recreated_registry_lists_the_providers_already_added(
+    add_provider, tmp_path, monkeypatch
+):
+    """A registry file created again finds the providers by their modules."""
+    package = tmp_path / "recreated_llm"
+    package.mkdir()
+    (package / "__init__.py").write_text(Path(registry.__file__).read_text())
+    for name in ("one", "two"):
+        (package / f"{name}.py").write_text(
+            PROVIDER_TEMPLATE
+            % {
+                "reply": "",
+                "client": CLIENTS["ok"],
+                "name": name,
+                "position": 1,
+                "required": (),
+            }
+        )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    importlib.invalidate_caches()
+    fresh = importlib.import_module("recreated_llm")
+    assert [p.name for p in fresh.providers()] == ["one", "two"]

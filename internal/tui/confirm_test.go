@@ -26,12 +26,12 @@ func confirmFeature(calls *int, existing string, planErr error) Feature {
 			}
 			return []string{"app/" + v[0] + ".py", "tests/test_" + v[0] + ".py"}, nil
 		},
-		Check: func(paths []string) error {
+		Check: func(v []string) (Preview, error) {
 			*calls++
 			if existing != "" {
-				return errors.New("Error: cannot add feature-1, these files already exist:\n  " + existing)
+				return Preview{}, errors.New("Error: cannot add feature-1, these files already exist:\n  " + existing)
 			}
-			return nil
+			return Preview{Create: []string{"app/" + v[0] + ".py", "tests/test_" + v[0] + ".py"}}, nil
 		},
 	}
 }
@@ -54,7 +54,6 @@ func TestConfirmView(t *testing.T) {
 		"aicli add feature-1 x",
 		"",
 		"Will create:",
-		"",
 		"  app/x.py",
 		"  tests/test_x.py",
 		"",
@@ -205,10 +204,10 @@ func TestConfirmRecomputes(t *testing.T) {
 }
 
 // TestConfirmWrapAndScroll checks that a long command is wrapped and never
-// truncated, and that paths scroll with the arrows under the fixed heading,
-// with the scroll hint in the footer.
+// truncated, and that the list rows, heading included, scroll with the
+// arrows, with the scroll hint in the footer.
 //
-// Covers: EC-010, FR-018
+// Covers: EC-010, FR-011, FR-018
 func TestConfirmWrapAndScroll(t *testing.T) {
 	var calls int
 	f := confirmFeature(&calls, "", nil)
@@ -224,17 +223,18 @@ func TestConfirmWrapAndScroll(t *testing.T) {
 	}
 	f.Command = func([]string) string { return "aicli add feature-1 x" }
 	f.Plan = func([]string) ([]string, error) { return []string{"p1", "p2", "p3", "p4", "p5"}, nil }
+	f.Check = func([]string) (Preview, error) { return Preview{Create: []string{"p1", "p2", "p3", "p4", "p5"}}, nil }
 	f.Short = ""
-	m, _ = newConfirmModel(f, []string{"x"}, false, 80, 9)
-	// header, cmd, blank, heading, up, 1 path, down, buttons, footer
+	m, _ = newConfirmModel(f, []string{"x"}, false, 80, 8)
+	// header, cmd, up, heading, 1 path, down, buttons, footer
 	v := m.View()
-	if !strings.Contains(v, "  p1") || strings.Contains(v, "  p2") || !strings.Contains(v, "↓ more") || !strings.Contains(v, "↑/↓ scroll · ←/→/tab") {
+	if !strings.Contains(v, "Will create:") || !strings.Contains(v, "  p1") || strings.Contains(v, "  p2") || !strings.Contains(v, "↓ more") || !strings.Contains(v, "↑/↓ scroll · ←/→/tab") {
 		t.Errorf("view:\n%s", v)
 	}
 	m, _ = pressC(m, tea.KeyMsg{Type: tea.KeyDown})
 	m, _ = pressC(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
 	v = m.View()
-	if !strings.Contains(v, "  p3") || !strings.Contains(v, "↑ more") || !strings.Contains(v, "Will create:") {
+	if !strings.Contains(v, "  p3") || !strings.Contains(v, "↑ more") || strings.Contains(v, "Will create:") {
 		t.Errorf("scrolled view:\n%s", v)
 	}
 	for i := 0; i < 10; i++ {

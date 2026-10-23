@@ -1,0 +1,2 @@
+Error: provider "openai" is given more than once
+  Usage: aicli add llm-provider <provider>... [flags]

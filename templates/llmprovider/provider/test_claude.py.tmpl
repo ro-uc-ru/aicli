@@ -1,0 +1,175 @@
+"""Tests of the claude provider: settings, registration and SDK arguments.
+
+They make no network call and need no anthropic SDK installed: the SDK is
+replaced by a fake module, or by a missing one. Every provider variable is
+unset and the project's .env is not read, whatever the developer's environment.
+"""
+
+import asyncio
+import logging
+import os
+import sys
+import types
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.ai import llm as registry
+from app.ai.llm import base
+from app.ai.llm import claude as provider
+from app.api.routers import llm as llm_router
+from app.errors import register_error_handlers
+
+NAME = "claude"
+POSITION = 2
+REQUIRED = ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL")
+PREFIXES = ("OPENAI_", "ANTHROPIC_", "GEMINI_", "GOOGLE_", "OLLAMA_")
+BODY = {"messages": [{"role": "user", "content": "hello"}]}
+MESSAGES = [base.Message(role="user", content="hi")]
+
+
+@pytest.fixture(autouse=True)
+def isolated_environment(tmp_path, monkeypatch):
+    """Unset every provider variable and keep the project's .env out of reach."""
+    for name in list(os.environ):
+        if name.startswith(PREFIXES):
+            monkeypatch.delenv(name)
+    monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture
+def http() -> TestClient:
+    """Test client of an app that only has the LLM router."""
+    app = FastAPI()
+    app.include_router(llm_router.router)
+    register_error_handlers(app)
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def configure(monkeypatch) -> None:
+    """Set every required variable of the provider."""
+    for variable in REQUIRED:
+        monkeypatch.setenv(variable, "value-of-" + variable.lower())
+
+
+def status() -> registry.ProviderStatus:
+    """Return the registry's state of this provider."""
+    return next(p for p in registry.providers() if p.name == NAME)
+
+
+def test_missing_variables_are_reported():
+    """With nothing set the provider is not configured and lists its variables."""
+    assert status() == registry.ProviderStatus(NAME, False, REQUIRED)
+
+
+def test_configured_when_the_variables_are_set(monkeypatch):
+    """Setting every required variable makes the provider configured."""
+    configure(monkeypatch)
+    assert status() == registry.ProviderStatus(NAME, True, ())
+
+
+def test_whitespace_only_values_count_as_missing(monkeypatch):
+    """A value of spaces is the same as no value."""
+    for variable in REQUIRED:
+        monkeypatch.setenv(variable, "   ")
+    assert status().missing == REQUIRED
+
+
+def test_values_are_read_from_the_root_env_file(tmp_path):
+    """The variables can come from the .env file of the project root."""
+    lines = [variable + "=from-file" for variable in REQUIRED]
+    (tmp_path / ".env").write_text("\n".join(lines) + "\n")
+    assert status().configured
+
+
+def test_model_has_no_default():
+    """The model must always be chosen by the user."""
+    assert provider.Settings().model is None
+
+
+def test_registered_at_its_position():
+    """The module declares its name and position, and the registry lists it."""
+    assert provider.PROVIDER.name == NAME
+    assert provider.PROVIDER.position == POSITION
+    assert provider.PROVIDER.required == REQUIRED
+    assert NAME in [p.name for p in registry.providers()]
+
+
+def test_client_implements_completion(monkeypatch):
+    """The client built by the registry is a CompletionClient."""
+    configure(monkeypatch)
+    client = registry.build_client(NAME)
+    assert registry.implements(client, base.CompletionClient)
+
+
+def test_missing_sdk_answers_502_and_health_still_works(monkeypatch, caplog, http):
+    """Without the SDK a completion fails with 502 and logs only the type."""
+    monkeypatch.setitem(sys.modules, "anthropic", None)
+    configure(monkeypatch)
+    with caplog.at_level(logging.INFO):
+        response = http.post("/llm/" + NAME + "/completion", json=BODY)
+    assert response.json() == {"status": 502, "message": "Bad Gateway"}
+    assert "Error" in caplog.text
+    for variable in REQUIRED:
+        assert "value-of-" + variable.lower() not in caplog.text
+    health = http.get("/llm/health")
+    assert health.status_code == 200
+    entry = next(p for p in health.json()["providers"] if p["name"] == NAME)
+    assert entry["configured"] is True
+
+
+def fake_sdk(monkeypatch) -> dict:
+    """Replace the anthropic SDK by a fake that records what it receives."""
+    calls = {}
+
+    class Messages:
+        async def create(self, **kwargs):
+            calls["create"] = kwargs
+            block = types.SimpleNamespace(type="text", text="generated")
+            return types.SimpleNamespace(content=[block])
+
+    class AsyncAnthropic:
+        def __init__(self, **kwargs):
+            calls["init"] = kwargs
+            self.messages = Messages()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+    module = types.ModuleType("anthropic")
+    module.AsyncAnthropic = AsyncAnthropic
+    monkeypatch.setitem(sys.modules, "anthropic", module)
+    return calls
+
+
+def test_client_passes_its_own_settings_to_the_sdk(monkeypatch):
+    """Key, model and URL are explicit, whatever else the environment holds."""
+    calls = fake_sdk(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key-1")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "model-1")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://elsewhere.invalid")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "other-token")
+    client = registry.build_client(NAME)
+    assert asyncio.run(client.complete(MESSAGES, "be brief", 7)) == "generated"
+    assert calls["init"] == {
+        "api_key": "key-1",
+        "base_url": "https://api.anthropic.com",
+    }
+    assert calls["create"] == {
+        "model": "model-1",
+        "max_tokens": 7,
+        "messages": [{"role": "user", "content": "hi"}],
+        "system": "be brief",
+    }
+
+
+def test_system_prompt_is_left_out_when_not_given(monkeypatch):
+    """Without a system prompt the SDK does not receive one."""
+    calls = fake_sdk(monkeypatch)
+    configure(monkeypatch)
+    asyncio.run(registry.build_client(NAME).complete(MESSAGES))
+    assert "system" not in calls["create"]

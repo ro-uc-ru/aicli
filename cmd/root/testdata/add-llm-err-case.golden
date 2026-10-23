@@ -1,0 +1,2 @@
+Error: provider must be one of: openai, claude, gemini, ollama
+  Usage: aicli add llm-provider <provider>... [flags]

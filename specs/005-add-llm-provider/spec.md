@@ -155,20 +155,20 @@ pyproject.toml               # inject at "# aicli:dependencies": the provider's 
 - Windows support: LIM-1.
 
 ## 5. Definition of Done
-- [ ] FR-001..FR-022 covered by tests
-- [ ] EC-001..EC-031 covered by tests
-- [ ] The contract test of spec 004 checks the multi-choice rules on the real tree and on test features that break each rule (FR-001)
-- [ ] Golden files cover the plain errors of FR-002 (missing value, repeated value), FR-003 (already added, and the fallback to spec 004 FR-023), FR-010 (missing target, target that is not a regular file, missing marker, repeated marker); a test checks that each styled error with ANSI and the `✗ ` prefix stripped equals the plain one and stdout stays empty
-- [ ] Golden files cover the plain and styled report of FR-011 for a first run with two providers, a later run with a third (`skip` and `update` lines), and a run where injection changes nothing
-- [ ] Unit tests of injection cover: insertion after the marker with its indentation, `\r\n` files, entries already present, several entries at one marker in plan order, a multi-line block with blank and repeated lines, a marker on the last line without line ending, byte-for-byte restore on failure, a target inside the root through a symbolic link (link and permissions kept) and one outside it, and a `shared` path that is a directory (FR-008..FR-011, EC-011..EC-014, EC-025, EC-028..EC-030)
-- [ ] teatest covers the direct form of `aicli add llm-provider` (FR-005), the checklist with keys, `Space`, click and focus markers visible with styling off, `(already added)` choices, the empty-selection error, all providers added, `Esc` quitting vs returning to the selector, and the confirmation with `Will create:` and `Will update:` (FR-006, FR-007, FR-011, EC-006, EC-015, EC-016)
-- [ ] Golden files of the generated files for each provider and of the injected `pyproject.toml`, `.env.example` and `app/api/router.py` (TST-2); the skeleton golden files of spec 001 are regenerated with the markers (FR-015)
-- [ ] A test checks that every generated file of FR-022 has its marker exactly once, and the generated tests return `501` for a fake client that does not implement `CompletionClient` (FR-020, FR-022)
-- [ ] An integration test (`integration` tag) scaffolds a project and runs `uv sync`; then, for `aicli add llm-provider openai` and then `aicli add llm-provider claude gemini ollama`, runs the project's pytest and ruff without syncing (`uv run --no-sync`), then `uv sync`, then pytest and ruff again; between the two runs it also runs `ruff check --fix` and `ruff format` (FR-021, EC-021, TST-3, TST-6)
-- [ ] The requirements on the generated app (FR-016..FR-020, EC-017..EC-019, EC-022..EC-024, EC-026, EC-027, EC-031) are covered by the generated tests, which the integration test runs; the doc comment of that Go test carries their `Covers:` line, and no generated file cites an aicli spec ID
-- [ ] The home screen and static `aicli add` golden files with the real tree are regenerated and show `llm-provider`
-- [ ] A test checks that, in static mode, a feature with inputs called with no arguments still fails as in spec 004 FR-006, and that a feature with no inputs called with no arguments runs without showing a form or a confirmation, also in interactive mode (FR-005)
-- [ ] `go test ./...` and `golangci-lint run` pass (TST-4)
+- [x] FR-001..FR-022 covered by tests
+- [x] EC-001..EC-031 covered by tests
+- [x] The contract test of spec 004 checks the multi-choice rules on the real tree and on test features that break each rule (FR-001)
+- [x] Golden files cover the plain errors of FR-002 (missing value, repeated value), FR-003 (already added, and the fallback to spec 004 FR-023), FR-010 (missing target, target that is not a regular file, missing marker, repeated marker); a test checks that each styled error with ANSI and the `✗ ` prefix stripped equals the plain one and stdout stays empty
+- [x] Golden files cover the plain and styled report of FR-011 for a first run with two providers, a later run with a third (`skip` and `update` lines), and a run where injection changes nothing
+- [x] Unit tests of injection cover: insertion after the marker with its indentation, `\r\n` files, entries already present, several entries at one marker in plan order, a multi-line block with blank and repeated lines, a marker on the last line without line ending, byte-for-byte restore on failure, a target inside the root through a symbolic link (link and permissions kept) and one outside it, and a `shared` path that is a directory (FR-008..FR-011, EC-011..EC-014, EC-025, EC-028..EC-030)
+- [x] teatest covers the direct form of `aicli add llm-provider` (FR-005), the checklist with keys, `Space`, click and focus markers visible with styling off, `(already added)` choices, the empty-selection error, all providers added, `Esc` quitting vs returning to the selector, and the confirmation with `Will create:` and `Will update:` (FR-006, FR-007, FR-011, EC-006, EC-015, EC-016)
+- [x] Golden files of the generated files for each provider and of the injected `pyproject.toml`, `.env.example` and `app/api/router.py` (TST-2); the skeleton golden files of spec 001 are regenerated with the markers (FR-015)
+- [x] A test checks that every generated file of FR-022 has its marker exactly once, and the generated tests return `501` for a fake client that does not implement `CompletionClient` (FR-020, FR-022)
+- [x] An integration test (`integration` tag) scaffolds a project and runs `uv sync`; then, for `aicli add llm-provider openai` and then `aicli add llm-provider claude gemini ollama`, runs the project's pytest and ruff without syncing (`uv run --no-sync`), then `uv sync`, then pytest and ruff again; between the two runs it also runs `ruff check --fix` and `ruff format` (FR-021, EC-021, TST-3, TST-6)
+- [x] The requirements on the generated app (FR-016..FR-020, EC-017..EC-019, EC-022..EC-024, EC-026, EC-027, EC-031) are covered by the generated tests, which the integration test runs; the doc comment of that Go test carries their `Covers:` line, and no generated file cites an aicli spec ID
+- [x] The home screen and static `aicli add` golden files with the real tree are regenerated and show `llm-provider`
+- [x] A test checks that, in static mode, a feature with inputs called with no arguments still fails as in spec 004 FR-006, and that a feature with no inputs called with no arguments runs without showing a form or a confirmation, also in interactive mode (FR-005)
+- [x] `go test ./...` and `golangci-lint run` pass (TST-4)
 
 ## 6. Changelog
 - 2026-10-21: Cited the amended SEC-5 (marker injection is not overwriting) in FR-009 after QA-1.

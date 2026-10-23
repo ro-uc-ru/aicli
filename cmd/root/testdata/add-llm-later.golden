@@ -1,0 +1,17 @@
+skip    app/ai/llm/__init__.py
+skip    app/ai/llm/base.py
+skip    app/services/llm.py
+skip    app/schemas/llm.py
+skip    app/api/routers/llm.py
+skip    tests/test_llm_router.py
+create  app/ai/llm/claude.py
+create  tests/test_llm_claude.py
+skip    app/api/router.py
+update  pyproject.toml
+update  .env.example
+
+Added llm-provider
+
+Next steps:
+  Run uv sync to install the provider SDKs
+  Set ANTHROPIC_API_KEY, ANTHROPIC_MODEL in .env

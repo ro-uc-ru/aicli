@@ -102,3 +102,88 @@ func TestValidateValues(t *testing.T) {
 		t.Fatalf("messages differ from %s:\n%s", path, got.String())
 	}
 }
+
+// multiFixture builds a test add tree with a text input followed by a
+// multi-choice input of four choices.
+func multiFixture() (*cobra.Command, *Declaration) {
+	cmd := NewCommand(Declaration{Name: "feature-m", Inputs: []Input{
+		{Name: "label"},
+		{Name: "item", Multi: true, Choices: []string{"openai", "claude", "gemini", "ollama"}},
+	}})
+	root := &cobra.Command{Use: "aicli"}
+	add := &cobra.Command{Use: "add"}
+	root.AddCommand(add)
+	add.AddCommand(cmd)
+	d, _ := Lookup(cmd)
+	return cmd, d
+}
+
+// TestValidateValuesMulti checks the multi-choice input: no value, repeated
+// values after trimming, case and unknown names, the order between the
+// checks, trimming, and that the values come back in choice order with the
+// same equivalent command whatever order they were given in. The plain
+// messages are compared with a golden file.
+//
+// Covers: FR-002, FR-004, EC-001, EC-002, EC-003
+func TestValidateValuesMulti(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		ok   bool
+	}{
+		{"none", nil, false},
+		{"no-multi-value", []string{"x"}, false},
+		{"repeated", []string{"x", "openai", "openai"}, false},
+		{"repeated-trimmed", []string{"x", " openai", "openai"}, false},
+		{"repeated-first-named", []string{"x", "claude", "openai", "openai", "claude"}, false},
+		{"case", []string{"x", "OpenAI"}, false},
+		{"vendor", []string{"x", "anthropic"}, false},
+		{"product", []string{"x", "openai", "chatgpt"}, false},
+		{"empty", []string{"x", "openai", " "}, false},
+		{"control", []string{"x", "open\nai"}, false},
+		{"unknown-before-repeat", []string{"x", "openai", "chatgpt", "openai"}, false},
+		{"empty-label", []string{" ", "openai"}, false},
+		{"valid-single", []string{"x", "ollama"}, true},
+		{"valid-many", []string{"x", "ollama", " openai "}, true},
+	}
+	var got strings.Builder
+	for _, tc := range tests {
+		cmd, d := multiFixture()
+		_, err := ValidateValues(cmd, d, tc.args)
+		if (err == nil) != tc.ok {
+			t.Fatalf("%s: err = %v, want ok=%v", tc.name, err, tc.ok)
+		}
+		if tc.ok {
+			continue
+		}
+		got.WriteString("== " + tc.name + "\n" + err.Error() + "\n")
+	}
+	cmd, d := multiFixture()
+	a, err := ValidateValues(cmd, d, []string{"x", "ollama", "openai"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := ValidateValues(cmd, d, []string{"x", "openai", "ollama"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(a, "|") != "x|openai|ollama" || strings.Join(b, "|") != strings.Join(a, "|") {
+		t.Fatalf("values = %q and %q, want x|openai|ollama", a, b)
+	}
+	if ea, eb := EquivalentCommand("feature-m", a), EquivalentCommand("feature-m", b); ea != eb || ea != "aicli add feature-m x openai ollama" {
+		t.Fatalf("equivalent commands = %q and %q", ea, eb)
+	}
+	path := filepath.Join("testdata", "values_multi.golden")
+	if *update {
+		if err := os.WriteFile(path, []byte(got.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != string(want) {
+		t.Fatalf("messages differ from %s:\n%s", path, got.String())
+	}
+}

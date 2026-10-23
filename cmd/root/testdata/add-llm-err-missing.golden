@@ -1,0 +1,2 @@
+Error: llm-provider requires provider
+  Usage: aicli add llm-provider <provider>... [flags]

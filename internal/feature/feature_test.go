@@ -45,3 +45,22 @@ func TestNewCommandUseLine(t *testing.T) {
 		t.Fatalf("Args rejected no arguments: %v", err)
 	}
 }
+
+// TestNewCommandMultiUseLine checks that a multi-choice input is written as
+// <input>... in the usage line.
+//
+// Covers: FR-001, FR-002
+func TestNewCommandMultiUseLine(t *testing.T) {
+	add := &cobra.Command{Use: "add"}
+	root := &cobra.Command{Use: "aicli"}
+	cmd := NewCommand(Declaration{Name: "feature-m", Inputs: []Input{{
+		Name: "item", Choices: []string{"a", "b"}, Multi: true, ItemNoun: "items",
+		ItemFiles: map[string]string{"a": "out/a.txt"},
+	}}})
+	add.AddCommand(cmd)
+	root.AddCommand(add)
+	cmd.InitDefaultHelpFlag()
+	if got, want := cmd.UseLine(), "aicli add feature-m <item>... [flags]"; got != want {
+		t.Fatalf("UseLine() = %q, want %q", got, want)
+	}
+}
